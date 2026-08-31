@@ -63,3 +63,9 @@ test/types/index.js
 
 # compiled app
 dist
+
+# secrets
+.env
+.env.local
+.env.*.local
+
