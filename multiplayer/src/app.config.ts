@@ -6,6 +6,7 @@ import {
   createRouter,
   createEndpoint,
 } from "colyseus";
+import { QuickMatchRoom } from "./rooms/QuickMatchRoom.js";
 
 /**
  * Import your Room files
@@ -19,6 +20,7 @@ const server = defineServer({
    */
   rooms: {
     my_room: defineRoom(MyRoom),
+    quick_match: defineRoom(QuickMatchRoom),
   },
 
   /**
