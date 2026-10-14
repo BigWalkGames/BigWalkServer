@@ -22,7 +22,7 @@ console.log(`joined as ${me}, waiting for an opponent...`);
 
 // Register every handler right away, in the same step as joining,
 // so no message from the server can arrive before it has a listener.
-let typingTimer;
+let typingTimer;2
 
 room.onMessage("match_found", ({ players, words, countdownSeconds, durationSeconds }) => {
   console.log(`match found! ${words.length} words, ${durationSeconds}s race, starting in ${countdownSeconds}s`);

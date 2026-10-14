@@ -2,10 +2,7 @@ import { Room, Client, CloseCode } from "colyseus";
 import { pickWords } from "./words.js";
 
 /**
- * Quick Match: a 1v1 race.
- *
- * Covers P15 (pairing + wait timeout), P17 (opponent leaves), P19 (shared words
- * and a synced start) and P21 (final results decided on the server).
+ * Quick Match: a 1v1 race
  *
  * Flow:   waiting --> countdown --> racing --> finished
  *
