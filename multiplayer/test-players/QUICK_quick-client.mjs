@@ -1,11 +1,11 @@
 // Test client for Quick Match. It "types" for you, so you can try a whole match
 // with two terminals and no web client.
 //
-//   node quick-client.mjs [server-url] [chars-per-second]
+//   node test-players/QUICK_quick-client.mjs [server-url] [chars-per-second]
 //
 // Examples:
-//   node quick-client.mjs                              (localhost, ~60 WPM)
-//   node quick-client.mjs http://localhost:2567 8      (a faster typist)
+//   node test-players/QUICK_quick-client.mjs                              (localhost, ~60 WPM)
+//   node test-players/QUICK_quick-client.mjs http://localhost:2567 8      (a faster typist)
 //
 // Run it in two terminals. Use different speeds to see who wins.
 // Press Ctrl+C in one of them mid-match to see "opponent left" in the other.
@@ -22,7 +22,7 @@ console.log(`joined as ${me}, waiting for an opponent...`);
 
 // Register every handler right away, in the same step as joining,
 // so no message from the server can arrive before it has a listener.
-let typingTimer;2
+let typingTimer;
 
 room.onMessage("match_found", ({ players, words, countdownSeconds, durationSeconds }) => {
   console.log(`match found! ${words.length} words, ${durationSeconds}s race, starting in ${countdownSeconds}s`);
