@@ -145,7 +145,26 @@ This is a plausibility check, not full anti-cheat. Per-keystroke timing checks a
 
 ## 9. Testing
 
-- `npm test` in `multiplayer/`: runs the automated tests (pairing, same words, synced start, progress relay, identical results, draw, bad progress ignored, wait timeout, leave during race, leave during countdown, dropped connection, third player gets a new room).
+### Automated tests
+
+`npm test` in `multiplayer/` runs 9 tests (file: `test/QuickMatchRoom.test.ts`). They run against real rooms with simulated players.
+
+| # | Test | What it checks | Card |
+|---|---|---|---|
+| 1 | pairs two players, gives them the same words, and starts them together | Two players are paired, both get the identical word list, and the countdown starts for both at once. | P15, P19 |
+| 2 | relays checked progress to the opponent only, then sends identical results | Progress goes to the other player only, not back to the sender. Both players get the same final results. | P19, P21 |
+| 3 | calls it a draw when both players finish level | Equal correct characters and equal accuracy gives `winner: null`. | P21 |
+| 4 | ignores progress that is impossible or malformed | Junk or cheating messages are ignored: more correct than typed, counts going backwards, typing faster than a human can. | Anti-cheat |
+| 5 | tells a lone player when nobody joined, then closes the room | After the wait time a lone player gets `no_opponent` and the room closes. | P16 |
+| 6 | ends the match for the other player when someone leaves mid-race | If a player leaves during the race, the other gets `opponent_left`. | P17 |
+| 7 | ends the match when someone leaves during the countdown | Same as test 6, but during the 3-2-1. | P17 |
+| 8 | treats a dropped connection like a leave | A connection that closes without warning counts as a leave. | P18 |
+| 9 | puts a third player in a new room instead of the full one | A room holds two players. A third player gets their own new room. | P15 |
+
+These test the server only. They do not test the browser, a real wifi drop, or two physical computers.
+
+### Manual testing
+
 - `test-players/QUICK_quick-client.mjs`: a bot for manual and demo runs. See `test-players/DOCUMENT_TEST_PLAYERS.md`.
 - `/monitor` on the server (for example `http://localhost:2567/monitor`) shows live rooms and players.
 
