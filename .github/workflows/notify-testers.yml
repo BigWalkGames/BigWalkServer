@@ -1,0 +1,138 @@
+# The server isn't deployed per PR; testers run the branch on their own
+# machine. On each push to a PR into Development:
+#   - requests review from the tester named on each linked Trello card
+#     ("**Tester:** <name>", mapped to GitHub via .github/testers.json), or
+#     from everyone in PREVIEW_TESTERS if no card names one (GitHub emails them)
+#   - comments how to check out the branch on the PR and on every linked Trello card
+#
+# Secrets:   TRELLO_API_KEY, TRELLO_TOKEN
+# Variables: PREVIEW_TESTERS (comma-separated GitHub usernames)
+name: Notify Testers
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [Development]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  notify-testers:
+    # Secrets aren't available to PRs from forks.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    concurrency:
+      group: notify-testers-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Notify testers (PR comment, review request, Trello)
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_TESTERS: ${{ vars.PREVIEW_TESTERS }}
+          TRELLO_API_KEY: ${{ secrets.TRELLO_API_KEY }}
+          TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const issue_number = pr.number;
+            const author = pr.user.login.toLowerCase();
+            const notAuthor = login => login.toLowerCase() !== author;
+            const checkout = `git fetch origin && git checkout ${pr.head.ref} && git pull --ff-only`;
+
+            // --- Trello cards linked in the PR description ---
+            const shortLinks = [...new Set(
+              [...(pr.body || '').matchAll(/trello\.com\/c\/([A-Za-z0-9]+)/g)].map(m => m[1])
+            )];
+            const trelloReady = Boolean(process.env.TRELLO_API_KEY && process.env.TRELLO_TOKEN);
+            const trello = (path, init = {}) => fetch(`https://api.trello.com/1${path}`, {
+              ...init,
+              headers: {
+                Authorization: `OAuth oauth_consumer_key="${process.env.TRELLO_API_KEY}", oauth_token="${process.env.TRELLO_TOKEN}"`,
+                'Content-Type': 'application/json',
+              },
+            });
+            if (!shortLinks.length) core.warning('No Trello card links found in the PR description.');
+            else if (!trelloReady) core.warning('TRELLO_API_KEY / TRELLO_TOKEN secrets not set; skipping Trello.');
+
+            // --- Who reviews: the cards' named testers, else everyone in PREVIEW_TESTERS ---
+            const nameToLogin = Object.fromEntries(
+              Object.entries(JSON.parse(fs.readFileSync('.github/testers.json', 'utf8')))
+                .map(([name, login]) => [name.trim().toLowerCase(), login])
+            );
+            const cardTesters = [], unmapped = [];
+            if (trelloReady) {
+              for (const card of shortLinks) {
+                const res = await trello(`/cards/${card}?fields=desc`);
+                if (!res.ok) { core.warning(`Trello card ${card}: ${res.status} ${await res.text()}`); continue; }
+                const { desc } = await res.json();
+                for (const m of (desc || '').matchAll(/^\W*Tester\b:?\W*(.+?)\s*$/gim)) {
+                  for (const name of m[1].split(/,|&|\band\b/)) {
+                    const login = nameToLogin[name.trim().toLowerCase()];
+                    if (login) cardTesters.push(login);
+                    else if (name.trim()) unmapped.push(name.trim());
+                  }
+                }
+              }
+            }
+            const fallback = (process.env.PREVIEW_TESTERS || '')
+              .split(',').map(t => t.trim().replace(/^@/, '')).filter(Boolean);
+            let reviewers = [...new Set(cardTesters)].filter(notAuthor);
+            const fromCards = reviewers.length > 0;
+            if (!fromCards) reviewers = fallback.filter(notAuthor);
+            if (unmapped.length) core.warning(`No GitHub username in .github/testers.json for: ${unmapped.join(', ')}`);
+
+            // --- PR comment (one, updated in place) ---
+            const marker = '<!-- notify-testers -->';
+            const body = [
+              marker,
+              `**Ready to test:** \`${pr.head.ref}\` at commit ${pr.head.sha.slice(0, 7)}. On the test machine:`,
+              '',
+              '```bash',
+              checkout,
+              '```',
+              '',
+              'Then follow **How to test** in the PR description.',
+              '',
+              reviewers.length
+                ? `${reviewers.map(t => `@${t}`).join(' ')}${fromCards ? ' (tester on the linked Trello card)' : ''}: please test, then under **Files changed → Review changes** either **Approve** (auto-merges into \`${pr.base.ref}\`) or **Request changes** with what failed. Leave the PR open; you'll be asked again when fixes are pushed.`
+                : '_No testers found: link a Trello card with a "Tester:" line, or set the PREVIEW_TESTERS repo variable._',
+              unmapped.length ? `\n_Trello tester(s) with no GitHub username in \`.github/testers.json\`: ${unmapped.join(', ')}_` : '',
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+            // (Re-)request review on every push so testers are emailed that new code is ready.
+            if (reviewers.length) {
+              try {
+                await github.rest.pulls.requestReviewers({ owner, repo, pull_number: issue_number, reviewers });
+              } catch (e) {
+                core.warning(`Could not request review from ${reviewers.join(', ')}: ${e.message}`);
+              }
+            }
+
+            // --- Trello comments (fallback in case the email is missed) ---
+            if (trelloReady) {
+              const text = [
+                `Server PR #${pr.number} "${pr.title}" is ready to test (branch ${pr.head.ref}, commit ${pr.head.sha.slice(0, 7)}):`,
+                checkout,
+                '',
+                `PR: ${pr.html_url}`,
+              ].join('\n');
+              for (const card of shortLinks) {
+                const res = await trello(`/cards/${card}/actions/comments`, { method: 'POST', body: JSON.stringify({ text }) });
+                if (res.ok) core.info(`Commented on Trello card ${card}`);
+                else core.warning(`Trello card ${card}: ${res.status} ${await res.text()}`);
+              }
+            }

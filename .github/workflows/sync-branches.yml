@@ -1,0 +1,98 @@
+# After anything lands on Development, merge Development into every
+# feature/* and fix/* branch so they stay current. A branch that conflicts is
+# left untouched and listed in a single open issue, which closes itself once
+# no branch conflicts.
+name: Sync Branches
+
+on:
+  push:
+    branches: [Development]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: sync-branches
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge Development into feature/* and fix/*
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          : > problems.txt
+
+          for ref in $(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/feature/*' 'refs/remotes/origin/fix/*'); do
+            branch="${ref#origin/}"
+
+            if git merge-base --is-ancestor origin/Development "$ref"; then
+              echo "$branch: already up to date"
+              continue
+            fi
+
+            git checkout -q -B "$branch" "$ref"
+            if ! git merge --no-edit -m "Merge Development into $branch (auto-sync)" origin/Development; then
+              files=$(git diff --name-only --diff-filter=U | paste -sd, -)
+              git merge --abort
+              echo "$branch: merge conflict"
+              printf '%s\t%s\t%s\n' "$branch" "merge conflict" "$files" >> problems.txt
+            elif ! git push origin "$branch"; then
+              echo "$branch: push failed"
+              printf '%s\t%s\t%s\n' "$branch" "push failed, likely a concurrent push" "" >> problems.txt
+            else
+              echo "$branch: synced"
+            fi
+          done
+
+      - name: Report branches that could not be synced
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const title = 'Branches out of sync with Development';
+            const problems = fs.readFileSync('problems.txt', 'utf8').split('\n').filter(Boolean).map(line => {
+              const [branch, reason, files] = line.split('\t');
+              return { branch, reason, files: files ? files.split(',') : [] };
+            });
+
+            const open = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'open' });
+            const existing = open.find(i => !i.pull_request && i.title === title);
+
+            if (!problems.length) {
+              if (existing) {
+                await github.rest.issues.createComment({ owner, repo, issue_number: existing.number, body: 'All branches are in sync again. Closing.' });
+                await github.rest.issues.update({ owner, repo, issue_number: existing.number, state: 'closed' });
+              }
+              return;
+            }
+
+            const lines = [];
+            for (const p of problems) {
+              const { data: tip } = await github.rest.repos.getCommit({ owner, repo, ref: p.branch });
+              const who = tip.author && tip.author.type === 'User' ? ` (last commit by @${tip.author.login})` : '';
+              lines.push(`- \`${p.branch}\`: ${p.reason}${who}`);
+              for (const f of p.files) lines.push(`  - \`${f}\``);
+            }
+
+            const body = [
+              'The last sync of `Development` could not update these branches:',
+              '',
+              ...lines,
+              '',
+              'To fix a conflict, locally run `git checkout <branch>`, `git merge origin/Development`, resolve the conflicts, then push. This issue updates on the next sync and closes when every branch is clean.',
+              '',
+              `Last run: ${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`,
+            ].join('\n');
+
+            if (existing) await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+            else await github.rest.issues.create({ owner, repo, title, body });

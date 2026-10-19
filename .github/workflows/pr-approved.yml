@@ -1,0 +1,64 @@
+# When a tester (listed in PREVIEW_TESTERS) approves a PR into Development,
+# merge it (this closes it).
+#
+# Rejections need no automation: the tester requests changes and leaves the
+# PR open; the developer's next push re-requests review.
+#
+# Variables: PREVIEW_TESTERS
+name: Merge on Tester Approval
+
+on:
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  merge:
+    if: >-
+      github.event.review.state == 'approved' &&
+      github.event.pull_request.base.ref == 'Development' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Merge PR
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_TESTERS: ${{ vars.PREVIEW_TESTERS }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const reviewer = context.payload.review.user.login.toLowerCase();
+            const testers = (process.env.PREVIEW_TESTERS || '')
+              .split(',')
+              .map(t => t.trim().replace(/^@/, '').toLowerCase())
+              .filter(Boolean);
+
+            if (!testers.includes(reviewer)) {
+              core.info(`${reviewer} is not in PREVIEW_TESTERS; not auto-merging.`);
+              return;
+            }
+
+            // Branch rules still apply: this fails if the branch is behind
+            // Development or another reviewer's "Request changes" is still open.
+            try {
+              await github.rest.pulls.merge({
+                owner, repo,
+                pull_number: pr.number,
+                sha: pr.head.sha, // don't merge commits the tester didn't see
+                merge_method: 'merge',
+              });
+            } catch (e) {
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pr.number,
+                body: [
+                  `Approved by @${reviewer}, but auto-merge failed: ${e.message}`,
+                  '',
+                  'Common causes: the branch is behind `Development` (click **Update branch**, then the tester re-tests and approves), or another reviewer\'s **Request changes** is still open.',
+                ].join('\n'),
+              });
+              core.setFailed(e.message);
+            }
