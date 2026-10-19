@@ -112,6 +112,19 @@ Class settings: `maxClients = 2`, `maxMessagesPerSecond = 30`.
 
 The list in this file is a placeholder. When the shared word bank (P9) is decided, replace `WORD_BANK` with it. `pickWords` is the only thing the room uses, so nothing else changes.
 
+### How to replace the word bank
+
+The list in `words.ts` is a placeholder. To use the team's real list (P9):
+
+1. Open `src/rooms/words.ts`.
+2. Replace the strings inside the `WORD_BANK` array with the real words. Keep them as lowercase strings separated by commas. Do not change the `pickWords` function or its name.
+3. Keep at least a few dozen words. `pickWords` avoids repeating the same word twice in a row, and an array with only one word would loop forever.
+4. Run `npm test`. All 9 tests should still pass, because none of them depend on specific words.
+5. Run the server and play one match with `test-players/QUICK_quick-client.mjs` to see the new words arrive.
+6. Commit `src/rooms/words.ts` and push.
+
+To change how many words are sent per match, set `WORD_COUNT` (section 6). It does not need a code change.
+
 ## 6. Settings (environment variables, server only)
 
 Read when a room is created. Set them before `npm start`, for example `QUICK_MATCH_WAIT_SECONDS=10 npm start`.
@@ -165,7 +178,7 @@ These test the server only. They do not test the browser, a real wifi drop, or t
 
 ### Manual testing
 
-- `test-players/QUICK_quick-client.mjs`: a bot for manual and demo runs. See `test-players/DOCUMENT_TEST_PLAYERS.md`.
+- `test-players/QUICK_quick-client.mjs`: a bot for manual and demo runs. Step-by-step instructions (server, two bots, different speeds, the other situations) are in `test-players/DOCUMENT_TEST_PLAYERS.md`.
 - `/monitor` on the server (for example `http://localhost:2567/monitor`) shows live rooms and players.
 
 ## 10. Known limitations / not built yet
