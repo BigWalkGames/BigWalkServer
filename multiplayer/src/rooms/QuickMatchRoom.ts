@@ -10,13 +10,13 @@ import { pickWords } from "./words.js";
  *   match_found        { players, words, countdownSeconds, durationSeconds }
  *   countdown          { seconds }              3, 2, 1
  *   go                 { durationSeconds }      start typing now
- *   opponent_progress  { typed, correct }       only the OTHER player gets this
+ *   opponent_progress  { typed, correct, wordResults? }  only the OTHER player gets this
  *   match_result       { winner, results }      winner = sessionId, or null for a draw
  *   opponent_left      {}                       opponent left or disconnected
  *   no_opponent        { waitedSeconds }        nobody joined in time
  *
  * Message the CLIENT sends:
- *   progress           { typed, correct }       cumulative counts since "go"
+ *   progress           { typed, correct, wordResults? }  cumulative counts since "go"
  */
 
 type Phase = "waiting" | "countdown" | "racing" | "finished";
@@ -30,6 +30,8 @@ interface PlayerStats {
 interface ProgressMessage {
   typed: number;
   correct: number;
+  /** Optional. One letter per completed word, in order: "g" no mistakes, "r" had a mistake. */
+  wordResults?: string;
 }
 
 /** Read settings from the environment when a room is created (never from clients). */
@@ -63,6 +65,7 @@ export class QuickMatchRoom extends Room {
   private phase: Phase = "waiting";
   private players = new Map<string, PlayerStats>();
   private totalChars = 0;
+  private wordTotal = 0;
   private startedAt = 0;
   private waitTimer?: Timer;
   private countdownTimer?: Timer;
@@ -121,6 +124,7 @@ export class QuickMatchRoom extends Room {
     const { countdownSeconds, durationSeconds, wordCount } = this.config;
     const words = pickWords(wordCount);
     this.totalChars = words.join(" ").length;
+    this.wordTotal = words.length;
 
     const ids = this.clients.map((c) => c.sessionId);
     for (const id of ids) {
@@ -177,11 +181,22 @@ export class QuickMatchRoom extends Room {
     const maxPlausible = Math.floor(elapsedSeconds * this.config.maxCharsPerSecond) + 10;
     if (typed > maxPlausible) return;                              // faster than a human can type
 
+    // wordResults is only for the opponent's progress bar. It is checked, never trusted.
+    const wordResults = message.wordResults;
+    if (wordResults !== undefined) {
+      if (typeof wordResults !== "string" || !/^[gr]*$/.test(wordResults)) return;
+      if (wordResults.length > this.wordTotal || wordResults.length > typed) return;
+    }
+
     stats.typed = typed;
     stats.correct = correct;
 
-    // Send the checked numbers to the other player, not the raw message.
-    this.broadcast("opponent_progress", { typed, correct }, { except: client });
+    // Send the checked values to the other player, not the raw message.
+    this.broadcast(
+      "opponent_progress",
+      wordResults === undefined ? { typed, correct } : { typed, correct, wordResults },
+      { except: client }
+    );
   }
 
   /** P21: results are computed here, so both players get the same answer. */

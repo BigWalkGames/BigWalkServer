@@ -142,6 +142,23 @@ describe("Quick Match", () => {
     assert.deepStrictEqual(progress, [{ typed: 6, correct: 6 }]);
   });
 
+  it("relays wordResults to the opponent and ignores invalid ones", async () => {
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+
+    a.room.send("progress", { typed: 6, correct: 5, wordResults: "gx" });   // bad letter
+    a.room.send("progress", { typed: 6, correct: 5, wordResults: 5 });      // wrong type
+    a.room.send("progress", { typed: 6, correct: 5, wordResults: "g".repeat(7) }); // more words than typed letters
+    a.room.send("progress", { typed: 6, correct: 5, wordResults: "gr" });   // the only valid one
+
+    await waitFor(b.log, "opponent_progress");
+    await sleep(300);
+    const progress = b.log.filter((e) => e.type === "opponent_progress").map((e) => e.data);
+    assert.deepStrictEqual(progress, [{ typed: 6, correct: 5, wordResults: "gr" }]);
+  });
+
   it("tells a lone player when nobody joined, then closes the room", async () => {
     process.env.QUICK_MATCH_WAIT_SECONDS = "1";
     const a = await joinQuickMatch(colyseus);

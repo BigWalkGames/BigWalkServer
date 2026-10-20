@@ -39,14 +39,14 @@ The server is the referee: it chooses the words, runs the clock, validates the n
 | `match_found` | `{ players, words, countdownSeconds, durationSeconds }` | Room is full | Show the words. `words` is identical for both players. `players` is both session ids. |
 | `countdown` | `{ seconds }` | 3, 2, 1 | Show the number. |
 | `go` | `{ durationSeconds }` | Race starts | Enable typing, start the timer display. |
-| `opponent_progress` | `{ typed, correct }` | While racing, only to the opponent | Update the opponent's progress display. |
+| `opponent_progress` | `{ typed, correct, wordResults? }` | While racing, only to the opponent | Update the opponent's progress display. `wordResults` has one letter per completed word, in order: `g` no mistakes, `r` had a mistake. It is optional and only used for the opponent's progress bar. The server accepts only `g` and `r`, at most one per word and never more than `typed`. |
 | `match_result` | `{ winner, results }` | Race over | `winner` is a session id, or `null` for a draw. `results[sessionId] = { wpm, accuracy, correct, typed }`. |
 | `opponent_left` | `{}` | Opponent left mid-match | Go back to the Main Menu with a message. |
 | `no_opponent` | `{ waitedSeconds }` | Nobody joined in time | Go back to the Main Menu with a message. |
 
 ### Message the client sends
 
-`progress` with `{ typed, correct }`
+`progress` with `{ typed, correct, wordResults? }` (see `opponent_progress` above for `wordResults`)
 - `typed`: total key presses since `go` (backspace does not undo).
 - `correct`: how many of those were correct.
 - Both are cumulative totals, not per keystroke.
