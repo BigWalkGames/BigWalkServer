@@ -7,3 +7,5 @@ services:
       - "2567:2567"
     environment:
       - PORT=2567
+      - MONITOR_USER=${MONITOR_USER:-}
+      - MONITOR_PASSWORD=${MONITOR_PASSWORD:-}
