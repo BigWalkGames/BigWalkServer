@@ -123,7 +123,7 @@ The list in `words.ts` is a placeholder. To use the team's real list (P9):
 5. Run the server and play one match with `test-players/QUICK_quick-client.mjs` to see the new words arrive.
 6. Commit `src/rooms/words.ts` and push.
 
-To change how many words are sent per match, set `WORD_COUNT` (section 6). It does not need a code change.
+To change how many words are sent per match, set `WORD_COUNT` (section 6), for example `./mp-config.sh -w 30`. It does not need a code change.
 
 ## 6. Settings (environment variables, server only)
 
@@ -137,6 +137,22 @@ Read when a room is created. Set them before `npm start`, for example `QUICK_MAT
 | `WORD_COUNT` | 100 | Words sent per match |
 | `MAX_CHARS_PER_SECOND` | 25 | Plausibility limit (about 300 WPM) |
 | `RESULT_CLOSE_DELAY_MS` | 1000 | Pause before closing so both clients get the result |
+
+### Setting them on the Docker server: `mp-config.sh`
+
+`mp-config.sh` (in `multiplayer/`) writes the main settings to `multiplayer/.env`. `docker-compose.yml` passes them into the container. Every flag is optional. Flags you leave out keep their current value in `.env`, and other entries in `.env` (such as `MONITOR_PASSWORD`) are kept.
+
+| Flag | Variable | Meaning |
+|---|---|---|
+| `-d <seconds>` | `QUICK_MATCH_WAIT_SECONDS` | Wait for an opponent before being dropped back to the main menu |
+| `-t <seconds>` | `MATCH_DURATION_SECONDS` | Match length |
+| `-w <count>` | `WORD_COUNT` | Words per match |
+
+```bash
+./mp-config.sh -d 20 -t 45 -w 40
+```
+
+After writing `.env`, the script runs `docker compose up -d`, which recreates the container only if a value changed. Running `docker compose restart` by hand does not reload `.env`. Values must be positive whole numbers; anything else stops the script before it writes. To go back to a default, delete that line from `.env`.
 
 ## 7. What the server checks on `progress`
 
