@@ -1,7 +1,8 @@
 import assert from "assert";
-import { ColyseusTestServer, boot } from "@colyseus/testing";
+import type { ColyseusTestServer } from "@colyseus/testing";
 
-import appConfig from "../src/app.config.js";
+import type appConfig from "../src/app.config.js";
+import { sharedServer } from "./helpers/server.js";
 
 /**
  * Quick Match tests. They use the same joinOrCreate call the real client uses,
@@ -56,9 +57,8 @@ describe("Quick Match", () => {
     process.env.RESULT_CLOSE_DELAY_MS = "200";
     process.env.WORD_COUNT = "20";
     process.env.QUICK_MATCH_WAIT_SECONDS = "30";
-    colyseus = await boot(appConfig);
+    colyseus = await sharedServer();
   });
-  after(async () => colyseus.shutdown());
   beforeEach(async () => {
     process.env.QUICK_MATCH_WAIT_SECONDS = "30";
     await colyseus.cleanup();

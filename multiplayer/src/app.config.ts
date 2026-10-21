@@ -8,6 +8,12 @@ import {
   basicAuth,
 } from "colyseus";
 import { QuickMatchRoom } from "./rooms/QuickMatchRoom.js";
+import { CustomGameRoom } from "./rooms/CustomGameRoom.js";
+import { allowLookup, codeStatus } from "./rooms/roomCodes.js";
+import { assertAuthConfig } from "./auth.js";
+
+// Refuse to start with auth turned on but not configured (fail closed).
+assertAuthConfig();
 
 /**
  * Import your Room files
@@ -22,6 +28,7 @@ const server = defineServer({
   rooms: {
     my_room: defineRoom(MyRoom),
     quick_match: defineRoom(QuickMatchRoom),
+    custom_game: defineRoom(CustomGameRoom),
   },
 
   /**
@@ -32,6 +39,14 @@ const server = defineServer({
    *
    */
   routes: createRouter({
+    // P27: tells the Join Room screen what is wrong with a code before it tries to join.
+    // Answers: open | full | expired | invalid | rate_limited. Rate limited so codes can't be guessed fast.
+    room_code_status: createEndpoint("/api/room-code/status", { method: "GET" }, async (ctx) => {
+      const forwarded = ctx.request?.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+      const key = process.env.TRUST_PROXY === "true" && forwarded ? forwarded : "shared";
+      if (!allowLookup(key)) return { status: "rate_limited" };
+      return { status: await codeStatus(ctx.query?.code) };
+    }),
     api_hello: createEndpoint("/api/hello", { method: "GET" }, async (ctx) => {
       return { message: "Hello World" };
     }),
