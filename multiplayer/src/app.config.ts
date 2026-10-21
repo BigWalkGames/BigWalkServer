@@ -5,6 +5,7 @@ import {
   playground,
   createRouter,
   createEndpoint,
+  basicAuth,
 } from "colyseus";
 import { QuickMatchRoom } from "./rooms/QuickMatchRoom.js";
 
@@ -53,6 +54,11 @@ const server = defineServer({
      */
     if (process.env.NODE_ENV !== "production") {
       app.use("/monitor", monitor());
+    } else if (process.env.MONITOR_USER && process.env.MONITOR_PASSWORD) {
+      const guard = basicAuth({
+        users: { [process.env.MONITOR_USER]: process.env.MONITOR_PASSWORD },
+      });
+      app.use("/monitor", monitor({ use: [guard] }));
     }
 
     /**
