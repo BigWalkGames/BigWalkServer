@@ -12,7 +12,8 @@ import { generateUniqueCode, rememberClosedCode } from "./roomCodes.js";
  * results decided on the server).
  *
  * Messages the SERVER sends (on top of the race messages in MatchRoom):
- *   lobby         { code, players: [{ id, ready }] }   whenever someone joins, leaves or changes ready
+ *   lobby         { code, players: [{ id, ready }] }   whenever someone joins, leaves or changes ready.
+ *                                                      Also sent after the results, with nobody ready, for a rematch
  *   room_closed   { reason }                           "idle": nobody started a match in time
  *   opponent_left {}                                   the other player left the lobby or the match
  *
@@ -37,13 +38,31 @@ export class CustomGameRoom extends MatchRoom {
     await this.setPrivate(true);
     console.log("custom game room", code, "created");
 
-    // A lobby nobody starts a match in does not stay open forever.
+    this.startIdleTimer();
+  }
+
+  /** A lobby nobody starts a match in does not stay open forever. */
+  private startIdleTimer() {
+    this.idleTimer?.clear();
     this.idleTimer = this.clock.setTimeout(() => {
       if (this.phase !== "waiting") return;
       this.phase = "finished";
       this.broadcast("room_closed", { reason: "idle" });
       this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
     }, this.config.customIdleSeconds * 1000);
+  }
+
+  /**
+   * Rematch: after the results the room stays open and goes back to its lobby with
+   * nobody ready. When both players press Ready again, a new match starts with new words.
+   * If one of them leaves, the room closes as usual.
+   */
+  protected onMatchFinished() {
+    this.readyIds.clear();
+    this.phase = "waiting";
+    this.unlock();
+    this.broadcastLobby();
+    this.startIdleTimer();
   }
 
   onJoin(client: Client, options: any) {

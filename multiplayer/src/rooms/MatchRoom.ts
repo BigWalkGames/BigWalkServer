@@ -205,14 +205,29 @@ export abstract class MatchRoom extends Room {
       wordResults === undefined ? { typed, correct } : { typed, correct, wordResults },
       { except: client }
     );
+
+    // Finishing the last word ends the race right away. A player has finished when every
+    // character is right, or when the client says every word is done and has typed at least
+    // as many keys as the text has characters. The winner is still decided by finishMatch.
+    const typedAllWords =
+      wordResults !== undefined && wordResults.length === this.wordTotal && typed >= this.totalChars;
+    if (correct >= this.totalChars || typedAllWords) this.finishMatch(true);
   }
 
-  /** P21: results are computed here, so both players get the same answer. */
-  private finishMatch() {
+  /**
+   * P21: results are computed here, so both players get the same answer.
+   * `early` is true when a player finished the whole text before the time was up. Speeds are
+   * then worked out over the time the race really took.
+   */
+  private finishMatch(early = false) {
     if (this.phase !== "racing") return;
     this.phase = "finished";
+    this.raceTimer?.clear();
 
-    const minutes = this.config.durationSeconds / 60;
+    const { durationSeconds } = this.config;
+    const elapsed = (Date.now() - this.startedAt) / 1000;
+    const seconds = early ? Math.min(durationSeconds, Math.max(1, elapsed)) : durationSeconds;
+    const minutes = seconds / 60;
     const results: Record<string, PlayerResult> = {};
     for (const [id, stats] of this.players) {
       results[id] = {
@@ -236,15 +251,21 @@ export abstract class MatchRoom extends Room {
       }
     }
 
-    this.broadcast("match_result", { winner, results });
+    const reported = Math.round(seconds * 10) / 10;
+    this.broadcast("match_result", { winner, results, durationSeconds: reported });
     void saveResult({
       mode: this.mode,
       roomCode: this.roomCode,
       winner,
       results,
-      durationSeconds: this.config.durationSeconds,
+      durationSeconds: reported,
       finishedAt: new Date().toISOString(),
     });
+    this.onMatchFinished();
+  }
+
+  /** What happens to the room once the results are out. Quick Match: it closes. */
+  protected onMatchFinished() {
     this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
   }
 }
