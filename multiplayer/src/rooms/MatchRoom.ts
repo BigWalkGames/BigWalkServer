@@ -29,6 +29,7 @@ export type Timer = ReturnType<Room["clock"]["setTimeout"]>;
 interface PlayerStats {
   typed: number;   // total keystrokes so far
   correct: number; // correct characters so far
+  errors: number;  // letters wrong on the board right now (can go down when the player backspaces)
 }
 
 interface ProgressMessage {
@@ -36,6 +37,8 @@ interface ProgressMessage {
   correct: number;
   /** Optional. One letter per completed word, in order: "g" no mistakes, "r" had a mistake. */
   wordResults?: string;
+  /** Optional (older clients do not send it, which counts as 0). Letters currently wrong. */
+  errors?: number;
 }
 
 /** Read settings from the environment when a room is created (never from clients). */
@@ -136,7 +139,7 @@ export abstract class MatchRoom extends Room {
 
     const ids = this.clients.map((c) => c.sessionId);
     for (const id of ids) {
-      this.players.set(id, { typed: 0, correct: 0 });
+      this.players.set(id, { typed: 0, correct: 0, errors: 0 });
     }
 
     this.broadcast("match_found", {
@@ -178,12 +181,15 @@ export abstract class MatchRoom extends Room {
 
     const typed = message?.typed;
     const correct = message?.correct;
+    const errors = message?.errors ?? 0; // missing = older client
 
     // Basic server-side checks. Anything that fails is ignored, never trusted.
     if (!isCount(typed) || !isCount(correct)) return;
     if (correct > typed) return;                                   // can't be more correct than typed
     if (typed < stats.typed || correct < stats.correct) return;    // counts only go up
     if (correct > this.totalChars) return;                         // can't pass the end of the text
+    // errors is checked on its own: unlike typed and correct it can go down (backspace fixes a mistake).
+    if (!isCount(errors) || errors > typed || errors > this.totalChars) return;
 
     const elapsedSeconds = (Date.now() - this.startedAt) / 1000;
     const maxPlausible = Math.floor(elapsedSeconds * this.config.maxCharsPerSecond) + 10;
@@ -198,6 +204,7 @@ export abstract class MatchRoom extends Room {
 
     stats.typed = typed;
     stats.correct = correct;
+    stats.errors = errors;
 
     // Send the checked values to the other player, not the raw message.
     this.broadcast(
@@ -230,22 +237,27 @@ export abstract class MatchRoom extends Room {
     const minutes = seconds / 60;
     const results: Record<string, PlayerResult> = {};
     for (const [id, stats] of this.players) {
+      // Net WPM: gross speed (every keystroke counts, 5 per word) minus the errors left
+      // uncorrected, per minute. Never below 0.
+      const gross = stats.typed / 5 / minutes;
       results[id] = {
-        wpm: Math.round(stats.correct / 5 / minutes),
+        wpm: Math.max(0, Math.round(gross - stats.errors / minutes)),
         accuracy: stats.typed > 0 ? Math.round((stats.correct / stats.typed) * 100) : 0,
         correct: stats.correct,
         typed: stats.typed,
+        errors: stats.errors,
       };
     }
 
-    // Winner: most correct characters. Tie: better accuracy. Still tied: draw (null).
+    // Winner: highest Net WPM (the same number the players see). Tie: better accuracy.
+    // Still tied: draw (null).
     const [a, b] = [...this.players.keys()];
     let winner: string | null = null;
     if (a !== undefined && b !== undefined) {
       const ra = results[a];
       const rb = results[b];
-      if (ra.correct !== rb.correct) {
-        winner = ra.correct > rb.correct ? a : b;
+      if (ra.wpm !== rb.wpm) {
+        winner = ra.wpm > rb.wpm ? a : b;
       } else if (ra.accuracy !== rb.accuracy) {
         winner = ra.accuracy > rb.accuracy ? a : b;
       }

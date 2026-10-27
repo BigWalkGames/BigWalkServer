@@ -231,6 +231,20 @@ describe("Custom Game", () => {
     assert.strictEqual(saved.length, 1);
   });
 
+  it("uses the real elapsed time and subtracts uncorrected errors when someone finishes early", async () => {
+    const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
+    const total = words.join(" ").length;
+    host.room.send("progress", { typed: total, correct: total, errors: 3 });
+
+    const result = await waitFor(guest.log, "match_result", 3000);
+    const minutes = result.durationSeconds / 60;
+    const net = total / 5 / minutes - 3 / minutes;
+    const mine = result.results[host.room.sessionId];
+    assert.strictEqual(mine.errors, 3);
+    assert.ok(Math.abs(mine.wpm - net) <= 0.15 * net, `wpm ${mine.wpm} should be about ${Math.round(net)}`);
+    assert.ok(mine.wpm < Math.round(total / 5 / minutes), "errors lower the speed");
+  });
+
   it("also ends the race when every word is done but some letters were wrong", async () => {
     const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
     const total = words.join(" ").length;
