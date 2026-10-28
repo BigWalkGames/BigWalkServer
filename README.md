@@ -121,6 +121,32 @@ If you get `Permission denied`, run `chmod +x mp-config.sh` once, or run it as `
 
 Other settings (countdown length, Custom Game idle time and more) have no flag. See [DOCUMENT_CONFIGURATION.md](multiplayer/docs/DOCUMENT_CONFIGURATION.md).
 
+## Test a pull request with `deploy-pr.sh`
+
+`deploy-pr.sh` deploys a pull request to a Docker host, replacing whatever runs on port `2567`. Use it on the test LXC, not on production.
+
+Install it once on the LXC. It runs from this copy, not from the clone, because checking out a PR replaces or removes the file in the clone:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BigWalkGames/BigWalkServer/main/multiplayer/deploy-pr.sh -o /usr/local/bin/deploy-pr.sh && chmod +x /usr/local/bin/deploy-pr.sh
+```
+
+Then deploy a PR by link or number:
+
+```bash
+deploy-pr.sh https://github.com/BigWalkGames/BigWalkServer/pull/12
+```
+
+### What it does
+
+1. Clones the repo to `~/BigWalkServer` if it is not there yet. Set `BIGWALK_DIR` to use another folder.
+2. Stops if the clone has local changes, so nothing is thrown away.
+3. Fetches the PR's latest commit (forks work too) and checks it out, detached.
+4. Runs `docker compose up -d --build` in `multiplayer/`.
+5. Waits up to 30 seconds for `/hi` to answer. If it does not, it prints the last 50 log lines and exits with an error.
+
+`multiplayer/.env` is gitignored, so it stays the same across PRs. Without one, defaults apply (`REQUIRE_AUTH=false`). Run the same command again to pick up new commits on the PR.
+
 ## More documentation
 
 | File | What it covers |
