@@ -139,11 +139,12 @@ deploy-pr.sh https://github.com/BigWalkGames/BigWalkServer/pull/12
 
 ### What it does
 
-1. Clones the repo to `~/BigWalkServer` if it is not there yet. Set `BIGWALK_DIR` to use another folder.
-2. Stops if the clone has local changes, so nothing is thrown away.
-3. Fetches the PR's latest commit (forks work too) and checks it out, detached.
-4. Runs `docker compose up -d --build` in `multiplayer/`.
-5. Waits up to 30 seconds for `/hi` to answer. If it does not, it prints the last 50 log lines and exits with an error.
+1. Removes dangling Docker images (`docker image prune -f`), the leftovers from earlier rebuilds.
+2. Clones the repo to `~/BigWalkServer` if it is not there yet. Set `BIGWALK_DIR` to use another folder.
+3. Stops if the clone has local changes, so nothing is thrown away.
+4. Fetches the PR's latest commit (forks work too) and checks it out, detached.
+5. Runs `docker compose up -d --build` in `multiplayer/`.
+6. Waits up to 30 seconds for `/hi` to answer. If it does not, it prints the last 50 log lines and exits with an error.
 
 `multiplayer/.env` is gitignored, so it stays the same across PRs. Without one, defaults apply (`REQUIRE_AUTH=false`). Run the same command again to pick up new commits on the PR.
 

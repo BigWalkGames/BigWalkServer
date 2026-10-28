@@ -25,6 +25,9 @@ main() {
     exit 1
   fi
 
+  # Dangling images are the ones earlier rebuilds left behind.
+  docker image prune -f
+
   [[ -d $REPO_DIR/.git ]] || git clone "$REPO_URL" "$REPO_DIR"
   cd "$REPO_DIR"
 
