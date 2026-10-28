@@ -129,6 +129,7 @@ Other settings (countdown length, Custom Game idle time and more) have no flag. 
 | [DOCUMENT_CONFIGURATION.md](multiplayer/docs/DOCUMENT_CONFIGURATION.md) | Every setting, its default, and whether Docker passes it to the container |
 | [DOCUMENT_TROUBLESHOOTING.md](multiplayer/docs/DOCUMENT_TROUBLESHOOTING.md) | Symptoms and fixes: startup, settings, connecting, git on the server |
 | [DOCUMENT_SERVER_START.md](multiplayer/docs/DOCUMENT_SERVER_START.md) | Homelab specifics: Proxmox, connecting to the LXC, testing from a Windows PC |
+| [DOCUMENT_PR_SERVER.md](multiplayer/docs/DOCUMENT_PR_SERVER.md) | The PR test server: per-PR deploys, setup, turning it off |
 | [DOCUMENT_QUICK_MATCH.md](multiplayer/docs/DOCUMENT_QUICK_MATCH.md) | Quick Match flow, the message contract with the web client, scoring, anti-cheat checks |
 | [DOCUMENT_CUSTOM_GAME.md](multiplayer/docs/DOCUMENT_CUSTOM_GAME.md) | Custom Game rooms, room codes, the auth design, saving results |
 | [DOCUMENT_TEST_PLAYERS.md](multiplayer/test-players/DOCUMENT_TEST_PLAYERS.md) | Running the test bots |
