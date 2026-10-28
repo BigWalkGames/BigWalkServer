@@ -123,7 +123,7 @@ Other settings (countdown length, Custom Game idle time and more) have no flag. 
 
 ## Test a pull request with `deploy-pr.sh`
 
-`deploy-pr.sh` deploys a pull request to a Docker host, replacing whatever runs on port `2567`. Use it on the test LXC, not on production.
+`deploy-pr.sh` deploys a pull request to a Docker host on port `2568`, replacing the PR deployed before it. Production stays on `2567`. Use it on the test LXC, not on production. It needs Docker Compose 2.24.4 or newer.
 
 Install it once on the LXC. It runs from this copy, not from the clone, because checking out a PR replaces or removes the file in the clone:
 
@@ -143,8 +143,9 @@ deploy-pr.sh https://github.com/BigWalkGames/BigWalkServer/pull/12
 2. Clones the repo to `~/BigWalkServer` if it is not there yet. Set `BIGWALK_DIR` to use another folder.
 3. Stops if the clone has local changes, so nothing is thrown away.
 4. Fetches the PR's latest commit (forks work too) and checks it out, detached.
-5. Runs `docker compose up -d --build` in `multiplayer/`.
-6. Waits up to 30 seconds for `/hi` to answer. If it does not, it prints the last 50 log lines and exits with an error.
+5. Writes `multiplayer/docker-compose.override.yml`, which publishes the server on `2568` instead of `2567`. Compose loads it on every command in `multiplayer/`, so `mp-config.sh` keeps the port too. The file is excluded in the clone's `.git/info/exclude`, so it never counts as a local change.
+6. Runs `docker compose up -d --build` in `multiplayer/`.
+7. Waits up to 30 seconds for `/hi` to answer on `2568`. If it does not, it prints the last 50 log lines and exits with an error.
 
 `multiplayer/.env` is gitignored, so it stays the same across PRs. Without one, defaults apply (`REQUIRE_AUTH=false`). Run the same command again to pick up new commits on the PR.
 
