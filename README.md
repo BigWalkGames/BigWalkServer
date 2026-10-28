@@ -123,19 +123,96 @@ Other settings (countdown length, Custom Game idle time and more) have no flag. 
 
 ## Test a pull request with `deploy-pr.sh`
 
-`deploy-pr.sh` deploys a pull request to a Docker host on port `2568`, replacing the PR deployed before it. Production stays on `2567`. Use it on the test LXC, not on production. It needs Docker Compose 2.24.4 or newer.
+`deploy-pr.sh` deploys one pull request at a time to the test LXC on port `2568`, replacing the PR deployed before it. Production runs on its own LXC on `2567` and is not touched.
 
-Install it once on the LXC. It runs from this copy, not from the clone, because checking out a PR replaces or removes the file in the clone:
+| Thing | Value |
+|---|---|
+| Test LXC | `192.168.4.30` |
+| Port | `2568` (HTTP and WebSocket) |
+| Public URL | `https://bgmptest.jdizzy.me` (Cloudflare Tunnel to `http://192.168.4.30:2568`) |
+| Folder on the LXC | `~/BigWalkServer/multiplayer` |
+
+### First-time setup (once per LXC)
+
+Run these on the LXC as root. Connecting is the same as for production, see [DOCUMENT_SERVER_START.md](multiplayer/docs/DOCUMENT_SERVER_START.md#2-connect).
+
+1. Check the tools. Docker Compose must be 2.24.4 or newer:
+
+```bash
+docker compose version && git --version && curl --version
+```
+
+Install git or curl if missing:
+
+```bash
+apt update && apt install -y git curl
+```
+
+2. Install the script. It runs from this copy, not from the clone, because checking out a PR replaces or removes the file in the clone:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BigWalkGames/BigWalkServer/main/multiplayer/deploy-pr.sh -o /usr/local/bin/deploy-pr.sh && chmod +x /usr/local/bin/deploy-pr.sh
 ```
 
-Then deploy a PR by link or number:
+Run the same command again to get a newer version of the script.
+
+3. Deploy any PR once. This clones the repo to `~/BigWalkServer`:
+
+```bash
+deploy-pr.sh <pr_number>
+```
+
+4. Create `.env`. The server is reachable from the internet through the public URL, so turn auth on. `SUPABASE_URL` must be the same project the web app uses, or every join fails with `401`:
+
+```bash
+cat > ~/BigWalkServer/multiplayer/.env <<'EOF'
+REQUIRE_AUTH=true
+SUPABASE_URL=https://<project-ref>.supabase.co
+TRUST_PROXY=false
+EOF
+```
+
+Keep `TRUST_PROXY=false` here. The server reads the first `X-Forwarded-For` address, which a caller can set to anything behind Cloudflare.
+
+5. Deploy again so the container picks up `.env`.
+
+### Deploy a PR
+
+By link or number:
 
 ```bash
 deploy-pr.sh https://github.com/BigWalkGames/BigWalkServer/pull/12
 ```
+
+```bash
+deploy-pr.sh 12
+```
+
+The last line should be `PR #12 is up on port 2568.` Run the same command again to pick up new commits on the PR, or with another PR to switch.
+
+### Check it
+
+On the LXC, from `~/BigWalkServer/multiplayer`. The port column should show `0.0.0.0:2568->2567/tcp` and nothing on `2567`:
+
+```bash
+docker compose ps
+```
+
+```bash
+git log -1 --oneline
+```
+
+From your PC (PowerShell):
+
+```powershell
+curl.exe https://bgmptest.jdizzy.me/hi
+```
+
+Logs, restarts and settings work as in [DOCUMENT_DEPLOY.md](multiplayer/docs/DOCUMENT_DEPLOY.md#5-day-to-day-operations), and `mp-config.sh` works the same way. The test bots send no token, so they get `401` while `REQUIRE_AUTH=true`.
+
+### Vercel previews
+
+Web preview deployments use this server through `VITE_MULTIPLAYER_URL` set to `wss://bgmptest.jdizzy.me` for the Preview environment only (Production keeps the production server). Vite bakes the value in at build time, so redeploy a preview after changing it. Every preview talks to whichever server PR was deployed last.
 
 ### What it does
 
@@ -147,7 +224,7 @@ deploy-pr.sh https://github.com/BigWalkGames/BigWalkServer/pull/12
 6. Runs `docker compose up -d --build` in `multiplayer/`.
 7. Waits up to 30 seconds for `/hi` to answer on `2568`. If it does not, it prints the last 50 log lines and exits with an error.
 
-`multiplayer/.env` is gitignored, so it stays the same across PRs. Without one, defaults apply (`REQUIRE_AUTH=false`). Run the same command again to pick up new commits on the PR.
+`multiplayer/.env` is gitignored, so it stays the same across PRs. Without one, defaults apply (`REQUIRE_AUTH=false`).
 
 ## More documentation
 
