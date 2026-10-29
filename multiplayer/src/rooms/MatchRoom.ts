@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { Room, Client } from "colyseus";
 import { pickWords } from "./words.js";
 import { saveResult, type PlayerResult } from "../results.js";
-import { authenticate } from "../auth.js";
+import { authenticate, type AuthUser } from "../auth.js";
 
 /**
  * The race itself, shared by Quick Match and Custom Game rooms.
@@ -73,6 +74,9 @@ export abstract class MatchRoom extends Room {
   protected config = readConfig();
   protected phase: Phase = "waiting";
   protected players = new Map<string, PlayerStats>();
+  /** Supabase user id per session id, taken when the match starts. */
+  protected accounts: Record<string, string> = {};
+  protected matchId = "";
   protected totalChars = 0;
   protected wordTotal = 0;
   protected startedAt = 0;
@@ -141,6 +145,10 @@ export abstract class MatchRoom extends Room {
     for (const id of ids) {
       this.players.set(id, { typed: 0, correct: 0, errors: 0 });
     }
+    this.matchId = randomUUID();
+    this.accounts = Object.fromEntries(
+      this.clients.map((c) => [c.sessionId, (c.auth as AuthUser).id])
+    );
 
     this.broadcast("match_found", {
       players: ids,
@@ -266,10 +274,12 @@ export abstract class MatchRoom extends Room {
     const reported = Math.round(seconds * 10) / 10;
     this.broadcast("match_result", { winner, results, durationSeconds: reported });
     void saveResult({
+      matchId: this.matchId,
       mode: this.mode,
       roomCode: this.roomCode,
       winner,
       results,
+      accounts: this.accounts,
       durationSeconds: reported,
       finishedAt: new Date().toISOString(),
     });

@@ -2,10 +2,9 @@
  * Where finished matches are reported (P28: "save Custom Game results with the room
  * code as how the match was made").
  *
- * The room only talks to this small interface. The default sink just logs, so the
- * server needs no database access yet. When saving to Supabase is agreed (it needs a
- * server-side key with limited rights), write a sink that implements `ResultSink`
- * and pass it to `setResultSink()` in `app.config.ts`. The rooms do not change.
+ * The room only talks to this small interface. The default sink just logs. With
+ * REQUIRE_AUTH=true and SUPABASE_SECRET_KEY set, `app.config.ts` swaps in the Supabase
+ * sink (`supabaseResultSink.ts`), which saves to match history. The rooms do not change.
  */
 export interface PlayerResult {
   wpm: number;
@@ -17,6 +16,8 @@ export interface PlayerResult {
 }
 
 export interface MatchSummary {
+  /** Unique per match. A Custom Game rematch gets a new one; the room code stays the same. */
+  matchId: string;
   /** How the match was made. */
   mode: "quick_match" | "custom";
   /** The room code, for custom games only. */
@@ -24,6 +25,8 @@ export interface MatchSummary {
   /** Session id of the winner, or null for a draw. */
   winner: string | null;
   results: Record<string, PlayerResult>;
+  /** Supabase user id for each session id ("local" when REQUIRE_AUTH is off). */
+  accounts: Record<string, string>;
   durationSeconds: number;
   finishedAt: string;
 }

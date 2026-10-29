@@ -194,6 +194,8 @@ describe("Custom Game", () => {
     assert.strictEqual(saved[0].mode, "custom");
     assert.strictEqual(saved[0].roomCode, host.code);
     assert.strictEqual(saved[0].winner, host.room.sessionId);
+    assert.match(saved[0].matchId, /^[0-9a-f-]{36}$/);
+    assert.deepStrictEqual(saved[0].accounts, { [host.room.sessionId]: "local", [guest.room.sessionId]: "local" });
   });
 
   /** Both players ready -> race running. Settings are read when the room is created. */
@@ -275,6 +277,8 @@ describe("Custom Game", () => {
     await waitFor(host.log, "match_result", 6000, 2);
     await sleep(100);
     assert.strictEqual(saved.length, 2, "each match saves its own result");
+    assert.notStrictEqual(saved[0].matchId, saved[1].matchId, "a rematch is a new match");
+    assert.strictEqual(saved[0].roomCode, saved[1].roomCode);
   });
 
   it("closes the room and tells the other player when someone leaves on the results screen", async () => {
