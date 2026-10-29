@@ -49,6 +49,7 @@ As `runner`, create `~/bigwalk-pr.env`. Same keys as the live `.env`; use a diff
 cat > ~/bigwalk-pr.env <<'EOF'
 REQUIRE_AUTH=true
 SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SECRET_KEY='sb_secret_...'
 TRUST_PROXY=true
 MONITOR_USER=admin
 MONITOR_PASSWORD='choose-a-strong-password'
@@ -59,7 +60,7 @@ EOF
 chmod 600 ~/bigwalk-pr.env
 ```
 
-It uses the same Supabase project as the live server (for sign-in only; results are not saved yet).
+It uses the same Supabase project as the live server, so match results from PR testing are saved to the same match history as live play. Leave `SUPABASE_SECRET_KEY` empty to only log results instead.
 
 ### 2.3 GitHub runner
 
