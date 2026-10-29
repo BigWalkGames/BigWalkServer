@@ -12,6 +12,8 @@ export interface PlayerResult {
   accuracy: number;
   correct: number;
   typed: number;
+  /** Letters still wrong at the end (not corrected). Net WPM subtracts these. */
+  errors: number;
 }
 
 export interface MatchSummary {
