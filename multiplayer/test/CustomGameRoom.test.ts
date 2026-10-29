@@ -194,6 +194,101 @@ describe("Custom Game", () => {
     assert.strictEqual(saved[0].mode, "custom");
     assert.strictEqual(saved[0].roomCode, host.code);
     assert.strictEqual(saved[0].winner, host.room.sessionId);
+    assert.match(saved[0].matchId, /^[0-9a-f-]{36}$/);
+    assert.deepStrictEqual(saved[0].accounts, { [host.room.sessionId]: "local", [guest.room.sessionId]: "local" });
+  });
+
+  /** Both players ready -> race running. Settings are read when the room is created. */
+  async function startRace(env: Record<string, string> = {}) {
+    const old: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(env)) { old[k] = process.env[k]; process.env[k] = v; }
+    try {
+      const host = await createRoom();
+      const guest = await joinRoom(host.code);
+      await waitFor(guest.log, "lobby");
+      host.room.send("ready", { ready: true });
+      guest.room.send("ready", { ready: true });
+      const found = await waitFor(host.log, "match_found");
+      await waitFor(host.log, "go");
+      await waitFor(guest.log, "go");
+      return { host, guest, words: found.words as string[] };
+    } finally {
+      for (const [k, v] of Object.entries(old)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
+  }
+
+  it("ends the race as soon as someone finishes the last word, and that player wins", async () => {
+    const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
+    const total = words.join(" ").length;
+    guest.room.send("progress", { typed: 10, correct: 9 });
+    host.room.send("progress", { typed: total, correct: total });
+
+    const result = await waitFor(guest.log, "match_result", 3000);
+    assert.deepStrictEqual(result, await waitFor(host.log, "match_result", 3000));
+    assert.strictEqual(result.winner, host.room.sessionId);
+    assert.strictEqual(result.results[host.room.sessionId].correct, total);
+    assert.ok(result.durationSeconds < 5, "reports the time the race really took");
+    assert.ok(result.results[host.room.sessionId].wpm > 100, "speed uses the real elapsed time, not the 30 seconds");
+    await sleep(100);
+    assert.strictEqual(saved.length, 1);
+  });
+
+  it("uses the real elapsed time and subtracts uncorrected errors when someone finishes early", async () => {
+    const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
+    const total = words.join(" ").length;
+    host.room.send("progress", { typed: total, correct: total, errors: 3 });
+
+    const result = await waitFor(guest.log, "match_result", 3000);
+    const minutes = result.durationSeconds / 60;
+    const net = total / 5 / minutes - 3 / minutes;
+    const mine = result.results[host.room.sessionId];
+    assert.strictEqual(mine.errors, 3);
+    assert.ok(Math.abs(mine.wpm - net) <= 0.15 * net, `wpm ${mine.wpm} should be about ${Math.round(net)}`);
+    assert.ok(mine.wpm < Math.round(total / 5 / minutes), "errors lower the speed");
+  });
+
+  it("also ends the race when every word is done but some letters were wrong", async () => {
+    const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
+    const total = words.join(" ").length;
+    const wordResults = "g".repeat(words.length - 1) + "r";
+    host.room.send("progress", { typed: total, correct: total - 2, wordResults });
+    const result = await waitFor(guest.log, "match_result", 3000);
+    assert.strictEqual(result.winner, host.room.sessionId);
+  });
+
+  it("goes back to the lobby after the results so the same two players can rematch", async () => {
+    const { host, guest } = await startRace();
+    host.room.send("progress", { typed: 8, correct: 7 });
+    guest.room.send("progress", { typed: 5, correct: 5 });
+    await waitFor(host.log, "match_result");
+    await sleep(300);
+    const lobby = host.log.filter((e) => e.type === "lobby").pop()!.data;
+    assert.deepStrictEqual(lobby.players.map((p: any) => p.ready), [false, false]);
+    assert.strictEqual(await codeStatus(host.room.roomId), "full", "same code, still two players");
+
+    host.room.send("ready", { ready: true });
+    await sleep(300);
+    assert.strictEqual(count(host.log, "match_found"), 1, "one ready player does not start the rematch");
+    guest.room.send("ready", { ready: true });
+    await waitFor(host.log, "match_found", 4000, 2);
+    await waitFor(guest.log, "match_found", 4000, 2);
+    await waitFor(host.log, "go", 4000, 2);
+    host.room.send("progress", { typed: 6, correct: 6 });
+    await waitFor(host.log, "match_result", 6000, 2);
+    await sleep(100);
+    assert.strictEqual(saved.length, 2, "each match saves its own result");
+    assert.notStrictEqual(saved[0].matchId, saved[1].matchId, "a rematch is a new match");
+    assert.strictEqual(saved[0].roomCode, saved[1].roomCode);
+  });
+
+  it("closes the room and tells the other player when someone leaves on the results screen", async () => {
+    const { host, guest } = await startRace();
+    await waitFor(host.log, "match_result");
+    await sleep(300);
+    await guest.room.leave();
+    await waitFor(host.log, "opponent_left");
+    await sleep(500);
+    assert.strictEqual(await codeStatus(host.room.roomId), "expired");
   });
 
   it("closes the room and tells the other player when someone leaves the lobby", async () => {

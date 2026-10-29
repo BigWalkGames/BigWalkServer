@@ -10,10 +10,19 @@ import {
 import { QuickMatchRoom } from "./rooms/QuickMatchRoom.js";
 import { CustomGameRoom } from "./rooms/CustomGameRoom.js";
 import { allowLookup, codeStatus } from "./rooms/roomCodes.js";
-import { assertAuthConfig } from "./auth.js";
+import { assertAuthConfig, authRequired } from "./auth.js";
+import { setResultSink } from "./results.js";
+import { supabaseResultSink } from "./supabaseResultSink.js";
 
 // Refuse to start with auth turned on but not configured (fail closed).
 assertAuthConfig();
+
+// Save finished matches to Supabase. Needs real account ids, so only when auth is on.
+if (authRequired() && process.env.SUPABASE_SECRET_KEY) {
+  setResultSink(supabaseResultSink(process.env.SUPABASE_URL!, process.env.SUPABASE_SECRET_KEY));
+} else if (authRequired()) {
+  console.warn("SUPABASE_SECRET_KEY is not set: finished matches are only logged, not saved");
+}
 
 /**
  * Import your Room files

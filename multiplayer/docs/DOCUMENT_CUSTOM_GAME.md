@@ -22,6 +22,8 @@ Covers cards P26 (create a room with a code), P27 (join by code), P28 (lobby sta
 3. **Lobby.** Everyone in the room gets `lobby { code, players: [{ id, ready }] }` whenever someone joins, leaves or changes ready.
 4. **Ready (P28).** Client sends `ready { ready: true }` (`ready: false` undoes it; no body means true). When both players are ready the same flow as Quick Match runs: `match_found`, `countdown`, `go`, `opponent_progress`, `match_result`.
 5. **Leave / close (P29).** If one player leaves the lobby or drops mid-match, the other gets `opponent_left` and the room closes a moment later. If nobody starts a match within `CUSTOM_ROOM_IDLE_SECONDS`, everyone gets `room_closed { reason: "idle" }`. A match abandoned mid-race has no result and nothing is saved.
+6. **Finishing early.** When a player types the whole text, the server ends the race right away (both modes). The winner rule is the same as Quick Match (highest Net WPM, then accuracy, else draw). `match_result` then carries `durationSeconds`, the time the race really took, and Net WPM is worked out over that time. If nobody finishes, the race ends at the full duration as before.
+7. **Rematch (Custom Game only).** After `match_result` the room stays open and goes back to its lobby: the server sends `lobby` with nobody ready and unlocks the room. When both players send `ready` again, a new match starts with new words (`match_found`, `countdown`, `go`, ...), and each match saves its own result. If a player leaves on the results screen, the other gets `opponent_left` and the room closes. The idle timer starts again, so a room nobody rematches in closes after `CUSTOM_ROOM_IDLE_SECONDS`. Quick Match still closes its room after the results.
 
 ### Join errors (P27)
 
@@ -78,10 +80,9 @@ Both modes report finished matches to a "result sink" (`src/results.ts`). The de
 
 ## 7. Tests
 
-`npm test` runs everything (29 tests): `test/QuickMatchRoom.test.ts` (unchanged), `test/CustomGameRoom.test.ts` (code format, lobby, Quick Match separation, status answers, HTTP endpoint, wrong/full code, rate limit, ready, shared words and results, result saved with room code, leave closes room, drop mid-race, idle close) and `test/auth.test.ts` (valid, forged, expired, wrong issuer/audience, missing, over-long tokens; room joins with and without a token).
+`npm test` runs everything (37 tests): `test/QuickMatchRoom.test.ts` (pairing, progress checks, Net WPM and errors, leaving), `test/CustomGameRoom.test.ts` (code format, lobby, Quick Match separation, status answers, HTTP endpoint, wrong/full code, rate limit, ready, shared words and results, result saved with room code, finishing the text ends the race, rematch, leaving on the results screen, leave closes room, drop mid-race, idle close) and `test/auth.test.ts` (valid, forged, expired, wrong issuer/audience, missing, over-long tokens; room joins with and without a token).
 
 ## 8. Not built yet
 
 - Client screens and sending the token (Matthew / Justin P).
 - Saving results to the database (section 6).
-- Rematch in the same room.

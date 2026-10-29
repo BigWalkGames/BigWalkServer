@@ -1,0 +1,30 @@
+# PR test server. Deployed by .github/workflows/pr-test-server.yml; see docs/DOCUMENT_PR_SERVER.md.
+# Kept apart from the live server (docker-compose.yml): own project, container,
+# image, port and env file, so starting or removing it never touches production.
+name: bigwalk-pr
+
+services:
+  multiplayer:
+    build:
+      context: .
+      labels:
+        bigwalk.pr: "true" # lets the workflow prune only PR images
+    image: bigwalk-multiplayer-pr:latest
+    container_name: bigwalk-multiplayer-pr
+    restart: unless-stopped
+    ports:
+      - "2568:2567"
+    # Caps so a bad PR can't starve the live server on the same host.
+    mem_limit: 512m
+    cpus: 1.0
+    environment:
+      - PORT=2567
+      - MONITOR_USER=${MONITOR_USER:-}
+      - MONITOR_PASSWORD=${MONITOR_PASSWORD:-}
+      - QUICK_MATCH_WAIT_SECONDS=${QUICK_MATCH_WAIT_SECONDS:-}
+      - MATCH_DURATION_SECONDS=${MATCH_DURATION_SECONDS:-}
+      - WORD_COUNT=${WORD_COUNT:-}
+      - REQUIRE_AUTH=${REQUIRE_AUTH:-false}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET:-}
+      - TRUST_PROXY=${TRUST_PROXY:-false}
