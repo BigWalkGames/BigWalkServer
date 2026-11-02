@@ -11,6 +11,7 @@ All settings are environment variables, read on the server only, never from clie
 | `REQUIRE_AUTH` | `false` | Yes | `true`: every Quick Match and Custom Game join must send `{ token: <Supabase access token> }`. Turn it on for any server reachable from the internet. |
 | `SUPABASE_URL` | (none) | Yes | Supabase project URL. Required when `REQUIRE_AUTH=true`; the server refuses to start without it. Tokens are checked against the project's public keys, so no secret key is needed. |
 | `SUPABASE_JWT_SECRET` | (none) | Yes | Only for legacy Supabase projects that sign tokens with a shared secret (HS256). Leave empty otherwise. |
+| `SUPABASE_SECRET_KEY` | (none) | Yes | Project secret key (`sb_secret_...`, or the legacy `service_role` key). With `REQUIRE_AUTH=true`, finished Quick Match and Custom Game results are saved to match history (`users.multiplayer_results`). Empty: results are only logged. Never put it in the web app. |
 | `TRUST_PROXY` | `false` | Yes | `true` only when a reverse proxy in front of the server sets `X-Forwarded-For`. Room-code lookups are then rate limited per caller instead of all callers sharing one limit. Turning it on without a proxy lets anyone dodge the rate limit. |
 | `MONITOR_USER` / `MONITOR_PASSWORD` | (none) | Yes | Login for `/monitor` in production. If either is empty, `/monitor` is off. |
 

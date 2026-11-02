@@ -1,0 +1,87 @@
+# Deploys each PR's *merged* result (Development + PR branch, via
+# refs/pull/N/merge) to the single PR test server on the homelab, then
+# comments its address on the PR. One slot: the latest push to any PR wins.
+#
+# Runs on a self-hosted runner labelled `bigwalk-pr-server`. It only uses
+# multiplayer/docker-compose.pr.yml (project `bigwalk-pr`), never the live
+# server's compose file, container or checkout. Setup and teardown:
+# multiplayer/docs/DOCUMENT_PR_SERVER.md.
+#
+# Variables: PR_SERVER_HOST (public hostname, e.g. mp-pr.example.com)
+# On the runner: ~/bigwalk-pr.env (settings for the PR container)
+name: PR Test Server
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [Development]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: pr-test-server
+  cancel-in-progress: true
+
+jobs:
+  deploy-pr-server:
+    # Never run fork code on the homelab. This repo is public, so also keep
+    # "Require approval for all external contributors" on (see the doc).
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, bigwalk-pr-server]
+    defaults:
+      run:
+        working-directory: multiplayer
+    steps:
+      - uses: actions/checkout@v4 # checks out the PR merge commit by default
+
+      - name: Check settings file
+        run: |
+          env_file="$HOME/bigwalk-pr.env"
+          [ -f "$env_file" ] || { echo "::error::$env_file not found on the runner"; exit 1; }
+          echo "COMPOSE=docker compose -p bigwalk-pr -f docker-compose.pr.yml --env-file $env_file" >> "$GITHUB_ENV"
+
+      - name: Build and start
+        run: $COMPOSE up -d --build
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 15); do
+            if $COMPOSE exec -T multiplayer wget -qO- http://localhost:2567/api/hello; then exit 0; fi
+            sleep 2
+          done
+          $COMPOSE logs --tail 50 multiplayer
+          exit 1
+
+      - name: Remove old PR images
+        if: always()
+        run: docker image prune -f --filter label=bigwalk.pr=true
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        env:
+          PR_SERVER_HOST: ${{ vars.PR_SERVER_HOST }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const issue_number = pr.number;
+            const host = process.env.PR_SERVER_HOST;
+            const marker = '<!-- pr-test-server -->';
+            const body = [
+              marker,
+              `**PR test server:** running \`${pr.head.ref}\` (merged with \`${pr.base.ref}\`) at commit ${pr.head.sha.slice(0, 7)}.`,
+              '',
+              host ? `Address: \`wss://${host}\` (Vercel previews use it).` : '_PR_SERVER_HOST repo variable is not set._',
+              '',
+              '_There is one PR server. A push to another PR replaces this one; push again (or re-run this job) to bring it back._',
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }

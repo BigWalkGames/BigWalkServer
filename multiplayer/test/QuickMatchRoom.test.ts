@@ -103,9 +103,73 @@ describe("Quick Match", () => {
     assert.deepStrictEqual(resultA, resultB, "both players get the same result");
 
     assert.strictEqual(resultA.winner, a.room.sessionId);
-    // 2-second race: wpm = (correct / 5) / (2 / 60)
-    assert.deepStrictEqual(resultA.results[a.room.sessionId], { wpm: 42, accuracy: 88, correct: 7, typed: 8 });
-    assert.deepStrictEqual(resultA.results[b.room.sessionId], { wpm: 30, accuracy: 100, correct: 5, typed: 5 });
+    // 2-second race, Net WPM = (typed / 5 - errors) / (2 / 60). These clients send no "errors"
+    // (like an older client), which counts as 0.
+    assert.deepStrictEqual(resultA.results[a.room.sessionId], { wpm: 48, accuracy: 88, correct: 7, typed: 8, errors: 0 });
+    assert.deepStrictEqual(resultA.results[b.room.sessionId], { wpm: 30, accuracy: 100, correct: 5, typed: 5, errors: 0 });
+  });
+
+  it("uses Net WPM: the latest uncorrected errors are subtracted, and errors can go down", async () => {
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+
+    a.room.send("progress", { typed: 8, correct: 7, errors: 5 });
+    await sleep(150);
+    a.room.send("progress", { typed: 8, correct: 7, errors: 2 }); // fixed three with backspace
+    b.room.send("progress", { typed: 5, correct: 5, errors: 0 });
+
+    const result = await waitFor(a.log, "match_result");
+    // gross = 8 / 5 / (2 / 60) = 48; errors cost 1 / (2 / 60) = 30 WPM each. 2 errors: 48 - 60 -> never below 0.
+    assert.strictEqual(result.results[a.room.sessionId].errors, 2, "the latest value is used, not the first");
+    assert.strictEqual(result.results[a.room.sessionId].wpm, 0);
+    assert.strictEqual(result.results[b.room.sessionId].wpm, 30);
+    // The winner follows the Net WPM shown, even though a has more correct letters (7 against 5).
+    assert.strictEqual(result.winner, b.room.sessionId);
+  });
+
+  it("breaks a Net WPM tie with accuracy, and calls it a draw when that is level too", async () => {
+    // Same typed count and errors, so the same Net WPM: 6 typed, 0 errors -> 36 WPM for both.
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+    a.room.send("progress", { typed: 6, correct: 6, errors: 0 });
+    b.room.send("progress", { typed: 6, correct: 5, errors: 0 });
+    const result = await waitFor(a.log, "match_result");
+    assert.strictEqual(result.results[a.room.sessionId].wpm, result.results[b.room.sessionId].wpm);
+    assert.strictEqual(result.winner, a.room.sessionId, "better accuracy wins the tie");
+  });
+
+  it("subtracts one error exactly (worked example)", async () => {
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+
+    a.room.send("progress", { typed: 8, correct: 7, errors: 1 });
+    const result = await waitFor(a.log, "match_result");
+    assert.strictEqual(result.results[a.room.sessionId].wpm, 18); // 48 - 30
+  });
+
+  it("ignores an invalid errors value, and still accepts a client that sends none", async () => {
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+
+    a.room.send("progress", { typed: 6, correct: 6, errors: -1 });    // negative
+    a.room.send("progress", { typed: 6, correct: 6, errors: 7 });     // more errors than typed
+    a.room.send("progress", { typed: 6, correct: 6, errors: 1.5 });   // not a whole number
+    a.room.send("progress", { typed: 6, correct: 6, errors: "2" });   // wrong type
+    a.room.send("progress", { typed: 6, correct: 6, errors: 100000 }); // past the end of the text
+    a.room.send("progress", { typed: 6, correct: 6 });                // no errors field: accepted as 0
+
+    await waitFor(b.log, "opponent_progress");
+    await sleep(300);
+    const progress = b.log.filter((e) => e.type === "opponent_progress").map((e) => e.data);
+    assert.deepStrictEqual(progress, [{ typed: 6, correct: 6 }]);
   });
 
   it("calls it a draw when both players finish level", async () => {

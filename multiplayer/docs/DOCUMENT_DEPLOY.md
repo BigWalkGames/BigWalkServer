@@ -22,12 +22,13 @@ git clone -b Development https://github.com/BigWalkGames/BigWalkServer.git ~/Big
 cd ~/BigWalkServer/multiplayer
 ```
 
-3. Create `.env`. It is gitignored; never commit it. Use your own Supabase project URL and a strong monitor password.
+3. Create `.env`. It is gitignored; never commit it. Use your own Supabase project URL, its secret key (Supabase dashboard → Project Settings → API Keys), and a strong monitor password.
 
 ```bash
 cat > .env <<'EOF'
 REQUIRE_AUTH=true
 SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SECRET_KEY='sb_secret_...'
 TRUST_PROXY=false
 MONITOR_USER=admin
 MONITOR_PASSWORD='choose-a-strong-password'
@@ -106,4 +107,4 @@ All from `multiplayer/`.
 
 `docker compose config` and `printenv` print secrets such as `MONITOR_PASSWORD`. Don't paste their output into chats or issues.
 
-Finished matches are logged as `match finished {...}`. Results are not saved to a database yet (`src/results.ts`).
+Finished matches are saved to match history when `SUPABASE_SECRET_KEY` is set (`src/supabaseResultSink.ts`). A failed save is logged as `could not save match result` and never breaks the match. Without the key, matches are only logged as `match finished {...}`.
