@@ -89,6 +89,9 @@ export function readConfig() {
     closeDelayMs: num("RESULT_CLOSE_DELAY_MS", 1000),
     // Custom Game: how long a lobby can sit without starting a match before it closes.
     customIdleSeconds: num("CUSTOM_ROOM_IDLE_SECONDS", 600),
+    // Quick Match: how long the room stays open after the results so the players can
+    // keep chatting (emotes). It closes sooner if one of them leaves.
+    postGameChatSeconds: num("POST_GAME_CHAT_SECONDS", 120),
     // Emotes: the least time between two emotes from the same player.
     emoteCooldownMs: num("EMOTE_COOLDOWN_MS", 500),
   };
@@ -105,6 +108,8 @@ export abstract class MatchRoom extends Room {
 
   protected config = readConfig();
   protected phase: Phase = "waiting";
+  /** True from the results until the next match starts: emotes are still accepted. */
+  protected chatOpen = false;
   protected players = new Map<string, PlayerStats>();
   /** Supabase user id per session id, taken when the match starts. */
   protected accounts: Record<string, string> = {};
@@ -159,6 +164,10 @@ export abstract class MatchRoom extends Room {
       this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
     } else if (this.phase === "waiting") {
       this.onLeaveBeforeMatch(client);
+    } else if (this.phase === "finished" && this.chatOpen) {
+      // Someone left the results screen: the chat is over, so close the room soon.
+      this.chatOpen = false;
+      this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
     }
   }
 
@@ -171,6 +180,7 @@ export abstract class MatchRoom extends Room {
   /** P19: both players get the same words and the same countdown. */
   protected startMatch() {
     this.lock(); // nobody else can join this match
+    this.chatOpen = false;
     this.phase = "countdown";
 
     const { countdownSeconds, durationSeconds, wordCount } = this.config;
@@ -224,7 +234,7 @@ export abstract class MatchRoom extends Room {
    * ignored, never an error. Both players (the sender too) receive `emote { id, from }`.
    */
   protected handleEmote(client: Client, message: { id?: unknown }) {
-    if (this.phase !== "racing") return;
+    if (this.phase !== "racing" && !this.chatOpen) return;
     if (!this.players.has(client.sessionId)) return;
     if (!isEmoteId(message?.id)) return;
 
@@ -339,11 +349,15 @@ export abstract class MatchRoom extends Room {
       durationSeconds: reported,
       finishedAt: new Date().toISOString(),
     });
+    this.chatOpen = true;
     this.onMatchFinished();
   }
 
-  /** What happens to the room once the results are out. Quick Match: it closes. */
+  /**
+   * What happens to the room once the results are out. Quick Match: it stays open for
+   * `postGameChatSeconds` so the players can keep sending emotes, then closes.
+   */
   protected onMatchFinished() {
-    this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
+    this.clock.setTimeout(() => this.disconnect(), this.config.postGameChatSeconds * 1000);
   }
 }

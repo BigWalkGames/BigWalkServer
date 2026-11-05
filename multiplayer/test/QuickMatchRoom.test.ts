@@ -278,7 +278,7 @@ describe("Quick Match", () => {
     delete process.env.EMOTE_COOLDOWN_MS;
   });
 
-  it("does not relay emotes before the race starts or after it ends (P43)", async () => {
+  it("does not relay emotes during the countdown, but does after the results so players can chat (P43)", async () => {
     process.env.EMOTE_COOLDOWN_MS = "0.001";
     const a = await joinQuickMatch(colyseus);
     const b = await joinQuickMatch(colyseus);
@@ -289,9 +289,23 @@ describe("Quick Match", () => {
     assert.strictEqual(count(b.log, "emote"), 0, "no emotes during the countdown");
 
     await waitFor(a.log, "match_result");
-    a.room.send("emote", { id: "gg" }); // race is over
+    await sleep(400); // longer than RESULT_CLOSE_DELAY_MS: the room is still open for chat
+    a.room.send("emote", { id: "gg" });
+    assert.deepStrictEqual(await waitFor(b.log, "emote"), { id: "gg", from: a.room.sessionId });
+    delete process.env.EMOTE_COOLDOWN_MS;
+  });
+
+  it("closes the post-game chat soon after one player leaves the results screen (P43)", async () => {
+    process.env.EMOTE_COOLDOWN_MS = "0.001";
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "match_result");
+    await waitFor(b.log, "match_result");
+    await a.room.leave();
+    await sleep(600); // RESULT_CLOSE_DELAY_MS is 200
+    b.room.send("emote", { id: "gg" });
     await sleep(100);
-    assert.strictEqual(count(b.log, "emote"), 0, "no emotes after the result");
+    assert.strictEqual(count(b.log, "emote"), 0, "nobody is left to chat with");
     delete process.env.EMOTE_COOLDOWN_MS;
   });
 

@@ -25,6 +25,7 @@ All settings are environment variables, read on the server only, never from clie
 | `COUNTDOWN_SECONDS` | 3 | No | Countdown before the race |
 | `MAX_CHARS_PER_SECOND` | 25 | No | Plausibility limit on reported typing (about 300 WPM) |
 | `RESULT_CLOSE_DELAY_MS` | 1000 | No | Pause before a room closes, so both clients get the result |
+| `POST_GAME_CHAT_SECONDS` | 120 | No | How long a Quick Match room stays open after the results so players can keep chatting (P43) |
 | `EMOTE_COOLDOWN_MS` | 500 | No | Least time between two emotes from the same player (P43) |
 | `CUSTOM_ROOM_IDLE_SECONDS` | 600 | No | A Custom Game lobby with no match started closes after this long |
 | `CLOSED_CODE_MEMORY_MINUTES` | 60 | No | How long a closed room code reads as `expired` instead of `invalid` |

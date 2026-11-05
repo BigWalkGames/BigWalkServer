@@ -240,6 +240,15 @@ describe("Custom Game", () => {
     await waitFor(host.log, "match_result", 8000, 2);
   });
 
+  it("lets friends keep chatting in the lobby after the results, until the next race starts (P43)", async () => {
+    const { host, guest } = await startRace({ MATCH_DURATION_SECONDS: "2", EMOTE_COOLDOWN_MS: "0.001" });
+    await waitFor(host.log, "match_result");
+    await sleep(300); // back in the lobby
+    guest.room.send("emote", { id: "gg" });
+    assert.deepStrictEqual(await waitFor(host.log, "emote"), { id: "gg", from: guest.room.sessionId });
+    assert.deepStrictEqual(await waitFor(guest.log, "emote"), { id: "gg", from: guest.room.sessionId });
+  });
+
   it("ends the race as soon as someone finishes the last word, and that player wins", async () => {
     const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
     const total = words.join(" ").length;
