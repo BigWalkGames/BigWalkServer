@@ -41,6 +41,7 @@ The server is the referee: it chooses the words, runs the clock, validates the n
 | `go` | `{ durationSeconds }` | Race starts | Enable typing, start the timer display. |
 | `opponent_progress` | `{ typed, correct, wordResults? }` | While racing, only to the opponent | Update the opponent's progress display. `wordResults` has one letter per completed word, in order: `g` no mistakes, `r` had a mistake. It is optional and only used for the opponent's progress bar. The server accepts only `g` and `r`, at most one per word and never more than `typed`. |
 | `match_result` | `{ winner, results }` | Race over | `winner` is a session id, or `null` for a draw. `results[sessionId] = { wpm, accuracy, correct, typed, errors }`. `wpm` is Net WPM. `durationSeconds` is the time the race really took (shorter than the full time when someone finished the text). |
+| `emote` | `{ id, from }` | A player sent an emote during the race. **Both** players get it, the sender too. | Show it in the match chat. `id` is one of the preset emote ids (below); `from` is the sender's session id. |
 | `opponent_left` | `{}` | Opponent left mid-match | Go back to the Main Menu with a message. |
 | `no_opponent` | `{ waitedSeconds }` | Nobody joined in time | Go back to the Main Menu with a message. |
 
@@ -52,6 +53,11 @@ The server is the referee: it chooses the words, runs the clock, validates the n
 - `errors` (optional): how many letters are wrong on the board right now. Unlike the other counts it can go down, because backspacing over a mistake fixes it. A missing `errors` (an older client) counts as 0.
 - `typed` and `correct` are cumulative totals, not per keystroke.
 - Send at most about 10 per second. More than 30 per second gets the client disconnected.
+
+`emote` with `{ id }` (P43)
+- `id` must be exactly one of the preset emote ids: `gg`, `nice`, `wow`, `oops`, `gl`, `hf`, `ez`, `close`, `fast`, `lol`, `sorry`, `thanks`, `again`, `ouch`, `focus`, `hurry` (the list is `EMOTE_IDS` in `src/rooms/MatchRoom.ts`). Anything else is ignored. There is no free text: the client owns the words for each id and each player chooses which emote goes on which arrow key.
+- Only accepted while the race is running (not in the countdown, and not after the result). Quick Match and Custom Game both use it.
+- Rate limit: one emote per player every `EMOTE_COOLDOWN_MS` (default 500). Faster ones are ignored, not an error, and nobody is disconnected.
 
 ### Connecting from the web client
 
@@ -71,10 +77,12 @@ room.onMessage("match_result", ({ winner, results }) => {
   const youWon = winner === room.sessionId; // null = draw
   const mine = results[room.sessionId];
 });
+room.onMessage("emote", ({ id, from }) => {});
 room.onMessage("opponent_left", () => {});
 room.onMessage("no_opponent", () => {});
 
 room.send("progress", { typed, correct }); // while racing
+room.send("emote", { id: "gg" });          // while racing
 room.leave();                              // cancel while waiting, or quit
 ```
 
@@ -138,6 +146,7 @@ Read when a room is created. Set them before `npm start`, for example `QUICK_MAT
 | `WORD_COUNT` | 100 | Words sent per match |
 | `MAX_CHARS_PER_SECOND` | 25 | Plausibility limit (about 300 WPM) |
 | `RESULT_CLOSE_DELAY_MS` | 1000 | Pause before closing so both clients get the result |
+| `EMOTE_COOLDOWN_MS` | 500 | Least time between two emotes from the same player |
 
 ### Setting them on the Docker server: `mp-config.sh`
 
@@ -178,7 +187,7 @@ This is a plausibility check, not full anti-cheat. Per-keystroke timing checks a
 
 ### Automated tests
 
-`npm test` in `multiplayer/` runs 9 tests (file: `test/QuickMatchRoom.test.ts`). They run against real rooms with simulated players.
+`npm test` in `multiplayer/` runs the tests below and the others in `test/` (this file: `test/QuickMatchRoom.test.ts`). They run against real rooms with simulated players.
 
 | # | Test | What it checks | Card |
 |---|---|---|---|
@@ -191,6 +200,8 @@ This is a plausibility check, not full anti-cheat. Per-keystroke timing checks a
 | 7 | ends the match when someone leaves during the countdown | Same as test 6, but during the 3-2-1. | P17 |
 | 8 | treats a dropped connection like a leave | A connection that closes without warning counts as a leave. | P18 |
 | 9 | puts a third player in a new room instead of the full one | A room holds two players. A third player gets their own new room. | P15 |
+| 10 | relays emotes to both players, and ignores unknown ids, bad messages and spam | The sender and the opponent both get `emote { id, from }`. Ids not in the list (including the old `up`/`down`), non-objects and emotes inside the cooldown are ignored. | P43 |
+| 11 | does not relay emotes before the race starts or after it ends | Nothing is relayed during the countdown or after `match_result`. | P43 |
 
 These test the server only. They do not test the browser, a real wifi drop, or two physical computers.
 
@@ -205,5 +216,5 @@ These test the server only. They do not test the browser, a real wifi drop, or t
 - A real wifi loss is noticed only after Colyseus's heartbeat times out, a few seconds. Tested with a closed socket, not a real wifi drop.
 - Not tested across two physical computers yet.
 - Players are not checked against Supabase login yet. Anyone who can reach the server can join.
-- Emotes (P43, post-MVP), a rematch with the same opponent, and skill-based pairing are not built. Play Again joins the queue fresh.
+- A Quick Match rematch with the same opponent and skill-based pairing are not built. Play Again joins the queue fresh. (Custom Game has rematch.)
 - A draw is `winner: null`. The stored `MultiplayerMatch.winner` is a Boolean, so draw handling needs a team decision.

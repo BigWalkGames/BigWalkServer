@@ -19,10 +19,40 @@ import { authenticate, type AuthUser } from "../auth.js";
  *   opponent_progress  { typed, correct, wordResults? }  only the OTHER player gets this
  *   match_result       { winner, results }      winner = sessionId, or null for a draw
  *   opponent_left      {}                       opponent left or disconnected
+ *   emote              { id, from }             a player sent an emote; BOTH players get it
  *
- * Message the CLIENT sends:
+ * Messages the CLIENT sends:
  *   progress           { typed, correct }       cumulative counts since "go"
+ *   emote              { id }                   id is one of EMOTE_IDS (the preset emote list)
  */
+
+/**
+ * The emotes a player can send: a fixed list of ids, never free text. The client shows
+ * the words for each id and lets every player choose which four go on the arrow keys.
+ * Anything not in this list is ignored. Keep it in step with the client's emote list.
+ */
+export const EMOTE_IDS = [
+  "gg",
+  "nice",
+  "wow",
+  "oops",
+  "gl",
+  "hf",
+  "ez",
+  "close",
+  "fast",
+  "lol",
+  "sorry",
+  "thanks",
+  "again",
+  "ouch",
+  "focus",
+  "hurry",
+] as const;
+export type EmoteId = (typeof EMOTE_IDS)[number];
+
+const isEmoteId = (value: unknown): value is EmoteId =>
+  typeof value === "string" && (EMOTE_IDS as readonly string[]).includes(value);
 
 export type Phase = "waiting" | "countdown" | "racing" | "finished";
 export type Timer = ReturnType<Room["clock"]["setTimeout"]>;
@@ -59,6 +89,8 @@ export function readConfig() {
     closeDelayMs: num("RESULT_CLOSE_DELAY_MS", 1000),
     // Custom Game: how long a lobby can sit without starting a match before it closes.
     customIdleSeconds: num("CUSTOM_ROOM_IDLE_SECONDS", 600),
+    // Emotes: the least time between two emotes from the same player.
+    emoteCooldownMs: num("EMOTE_COOLDOWN_MS", 500),
   };
 }
 
@@ -82,6 +114,8 @@ export abstract class MatchRoom extends Room {
   protected startedAt = 0;
   protected countdownTimer?: Timer;
   protected raceTimer?: Timer;
+  /** When each player last sent an emote (ms), for the rate limit. */
+  protected lastEmoteAt = new Map<string, number>();
 
   /** How the match was made, reported with the result. */
   protected abstract readonly mode: "quick_match" | "custom";
@@ -92,6 +126,9 @@ export abstract class MatchRoom extends Room {
   messages = {
     progress: (client: Client, message: ProgressMessage) => {
       this.handleProgress(client, message);
+    },
+    emote: (client: Client, message: { id?: unknown }) => {
+      this.handleEmote(client, message);
     },
   };
 
@@ -145,6 +182,7 @@ export abstract class MatchRoom extends Room {
     for (const id of ids) {
       this.players.set(id, { typed: 0, correct: 0, errors: 0 });
     }
+    this.lastEmoteAt.clear();
     this.matchId = randomUUID();
     this.accounts = Object.fromEntries(
       this.clients.map((c) => [c.sessionId, (c.auth as AuthUser).id])
@@ -178,6 +216,24 @@ export abstract class MatchRoom extends Room {
       () => this.finishMatch(),
       this.config.durationSeconds * 1000
     );
+  }
+
+  /**
+   * P43: a player sent an emote. Only ids from EMOTE_IDS are accepted, only while the
+   * race is on, and a player can send one every `emoteCooldownMs`. Anything else is
+   * ignored, never an error. Both players (the sender too) receive `emote { id, from }`.
+   */
+  protected handleEmote(client: Client, message: { id?: unknown }) {
+    if (this.phase !== "racing") return;
+    if (!this.players.has(client.sessionId)) return;
+    if (!isEmoteId(message?.id)) return;
+
+    const now = Date.now();
+    const last = this.lastEmoteAt.get(client.sessionId) ?? 0;
+    if (now - last < this.config.emoteCooldownMs) return; // too fast
+    this.lastEmoteAt.set(client.sessionId, now);
+
+    this.broadcast("emote", { id: message.id, from: client.sessionId });
   }
 
   /** The server counts the time, so a client can't stretch or shrink the race. */

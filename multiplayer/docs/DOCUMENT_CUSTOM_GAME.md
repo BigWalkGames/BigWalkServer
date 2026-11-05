@@ -66,7 +66,7 @@ The server checks the signature, issuer, audience and expiry with Supabase's pub
 | `CODE_LOOKUPS_PER_MINUTE` | 120 (20 per caller with `TRUST_PROXY=true`) | Code lookups allowed per minute. |
 | `TRUST_PROXY` | off | Set `true` only when the server sits behind a proxy that sets `X-Forwarded-For`; lookups are then limited per caller. |
 
-The Quick Match settings (`COUNTDOWN_SECONDS`, `MATCH_DURATION_SECONDS`, `WORD_COUNT`, `RESULT_CLOSE_DELAY_MS`, ...) apply to Custom Game races too.
+The Quick Match settings (`COUNTDOWN_SECONDS`, `MATCH_DURATION_SECONDS`, `WORD_COUNT`, `RESULT_CLOSE_DELAY_MS`, `EMOTE_COOLDOWN_MS`, ...) apply to Custom Game races too. Emotes (`emote { id }` in, `emote { id, from }` out, to both players) work in Custom Game exactly as in Quick Match, including in a rematch; see `DOCUMENT_QUICK_MATCH.md`.
 
 ## 5. Security notes
 
