@@ -27,6 +27,7 @@ export class CustomGameRoom extends MatchRoom {
 
   messages = {
     progress: (client: Client, message: any) => this.handleProgress(client, message),
+    emote: (client: Client, message: any) => this.handleEmote(client, message),
     ready: (client: Client, message: any) => this.handleReady(client, message),
   };
 

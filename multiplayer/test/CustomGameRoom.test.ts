@@ -19,7 +19,7 @@ import {
  * Run with:  npm test
  */
 
-const EVENTS = ["lobby", "match_found", "countdown", "go", "opponent_progress", "match_result", "opponent_left", "room_closed"];
+const EVENTS = ["lobby", "match_found", "countdown", "go", "opponent_progress", "match_result", "opponent_left", "room_closed", "emote"];
 
 type Logged = { type: string; data: any };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -216,6 +216,38 @@ describe("Custom Game", () => {
       for (const [k, v] of Object.entries(old)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     }
   }
+
+  it("relays emotes to both friends during the race, in the first match and in a rematch (P43)", async () => {
+    const { host, guest } = await startRace({ MATCH_DURATION_SECONDS: "2", EMOTE_COOLDOWN_MS: "5000" });
+    guest.room.send("emote", { id: "nice" });
+    assert.deepStrictEqual(await waitFor(host.log, "emote"), { id: "nice", from: guest.room.sessionId });
+    assert.deepStrictEqual(await waitFor(guest.log, "emote"), { id: "nice", from: guest.room.sessionId });
+    guest.room.send("emote", { id: "gg" }); // inside the 5 second cooldown
+    host.room.send("emote", { id: "nope" });
+    await sleep(150);
+    assert.strictEqual(count(host.log, "emote"), 1);
+
+    // Rematch: the cooldown starts fresh with the new match.
+    await waitFor(host.log, "match_result");
+    await sleep(300); // the room goes back to the lobby
+    host.room.send("ready", { ready: true });
+    guest.room.send("ready", { ready: true });
+    await waitFor(host.log, "go", 8000, 2);
+    guest.room.send("emote", { id: "oops" });
+    assert.deepStrictEqual(await waitFor(host.log, "emote", 8000, 2), { id: "oops", from: guest.room.sessionId });
+
+    // Let the rematch finish, so no race is still running when the next test starts.
+    await waitFor(host.log, "match_result", 8000, 2);
+  });
+
+  it("lets friends keep chatting in the lobby after the results, until the next race starts (P43)", async () => {
+    const { host, guest } = await startRace({ MATCH_DURATION_SECONDS: "2", EMOTE_COOLDOWN_MS: "0.001" });
+    await waitFor(host.log, "match_result");
+    await sleep(300); // back in the lobby
+    guest.room.send("emote", { id: "gg" });
+    assert.deepStrictEqual(await waitFor(host.log, "emote"), { id: "gg", from: guest.room.sessionId });
+    assert.deepStrictEqual(await waitFor(guest.log, "emote"), { id: "gg", from: guest.room.sessionId });
+  });
 
   it("ends the race as soon as someone finishes the last word, and that player wins", async () => {
     const { host, guest, words } = await startRace({ MATCH_DURATION_SECONDS: "30", MAX_CHARS_PER_SECOND: "100000" });
