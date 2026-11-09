@@ -121,6 +121,73 @@ If you get `Permission denied`, run `chmod +x mp-config.sh` once, or run it as `
 
 Other settings (countdown length, Custom Game idle time and more) have no flag. See [DOCUMENT_CONFIGURATION.md](multiplayer/docs/DOCUMENT_CONFIGURATION.md).
 
+## Deploy a PR to the test server with `deploy-pr.sh`
+
+`deploy-pr.sh` builds one pull request at a time on the test LXC and replaces the PR deployed before it. Production (`port 2567`) is not touched.
+
+| Thing | Value |
+|---|---|
+| Test LXC | PCT `103`, hostname `bgmp-testing` |
+| Port | `2568` |
+| Public URL | `https://bgmptest.jdizzy.me` (Cloudflare Tunnel to port `:2568`) |
+| Script | `/usr/local/bin/deploy-pr.sh` |
+| Clone | `~/BigWalkServer` |
+| Settings | `~/BigWalkServer/multiplayer/.env` |
+
+### Deploy
+
+1. On the Proxmox host, enter the test LXC:
+
+```bash
+pct enter 103
+```
+
+2. Make space first. The build fails with `no space left on device` when old build cache and images fill the disk:
+
+```bash
+docker builder prune -af && docker image prune -af
+```
+
+```bash
+df -h /
+```
+
+3. Deploy by PR number or link:
+
+```bash
+deploy-pr.sh 5
+```
+
+The last line should be `PR #5 is up on port 2568.` Run it again to pick up new commits on the PR, or with another number to switch.
+
+4. From your PC (PowerShell):
+
+```powershell
+curl.exe https://bgmptest.jdizzy.me/hi
+```
+
+### Pitfalls
+
+| Problem | Fix |
+|---|---|
+| `ENOSPC: no space left on device` during `npm ci` | Run step 2. If `df -h /` still shows little free space, grow the disk on the Proxmox host: `pct resize 103 rootfs +6G` (cannot easily be shrunk later), then deploy again. |
+| `deploy-pr.sh: command not found` | Run it by full path: `/usr/local/bin/deploy-pr.sh 5`. If the file is missing, install it again (below). |
+| `npm: command not found` | Not needed. `npm` runs inside the Docker build, not on the LXC. |
+| `has local changes` | The script stops so nothing is lost. See them with `git -C ~/BigWalkServer status --short`. Do not commit on the server. |
+| Every join fails with `401` | `SUPABASE_URL` in `.env` is not the project the web app uses. The test bots always get `401` while `REQUIRE_AUTH=true`. |
+| Settings change has no effect | The script reads only `~/BigWalkServer/multiplayer/.env`. `~/bigwalk-pr.env` is not used. Deploy again after editing. |
+
+- The PR branch is deployed as pushed, not merged with `main`.
+- Every Vercel preview talks to whichever PR was deployed last.
+
+### Install or update the script
+
+The script runs from `/usr/local/bin`, not from the clone, because checking out a PR replaces the clone's files. It is on the `chore/deploy-pr-script` branch until that branch is merged into `main`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BigWalkGames/BigWalkServer/chore/deploy-pr-script/multiplayer/deploy-pr.sh -o /usr/local/bin/deploy-pr.sh && chmod +x /usr/local/bin/deploy-pr.sh
+```
+
 ## More documentation
 
 | File | What it covers |
