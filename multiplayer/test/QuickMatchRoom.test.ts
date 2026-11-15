@@ -3,6 +3,7 @@ import type { ColyseusTestServer } from "@colyseus/testing";
 
 import type appConfig from "../src/app.config.js";
 import { sharedServer } from "./helpers/server.js";
+import { EMOTE_IDS } from "../src/rooms/MatchRoom.js";
 
 /**
  * Quick Match tests. They use the same joinOrCreate call the real client uses,
@@ -19,6 +20,7 @@ const EVENTS = [
   "match_result",
   "opponent_left",
   "no_opponent",
+  "emote",
 ];
 
 type Logged = { type: string; data: any };
@@ -35,11 +37,11 @@ async function joinQuickMatch(colyseus: ColyseusTestServer<any>) {
   return { room, log };
 }
 
-async function waitFor(log: Logged[], type: string, ms = 8000) {
+async function waitFor(log: Logged[], type: string, ms = 8000, nth = 1) {
   const start = Date.now();
   while (Date.now() - start < ms) {
-    const found = log.find((entry) => entry.type === type);
-    if (found) return found.data;
+    const found = log.filter((entry) => entry.type === type);
+    if (found.length >= nth) return found[nth - 1].data;
     await sleep(20);
   }
   throw new Error(`timed out waiting for "${type}"`);
@@ -221,6 +223,90 @@ describe("Quick Match", () => {
     await sleep(300);
     const progress = b.log.filter((e) => e.type === "opponent_progress").map((e) => e.data);
     assert.deepStrictEqual(progress, [{ typed: 6, correct: 5, wordResults: "gr" }]);
+  });
+
+  it("relays emotes to both players, and ignores ids that are not in the list, bad messages and spam (P43)", async () => {
+    process.env.EMOTE_COOLDOWN_MS = "300";
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+
+    // Sent during the race: the sender AND the opponent both get it, with who sent it.
+    a.room.send("emote", { id: "gg" });
+    assert.deepStrictEqual(await waitFor(a.log, "emote"), { id: "gg", from: a.room.sessionId });
+    assert.deepStrictEqual(await waitFor(b.log, "emote"), { id: "gg", from: a.room.sessionId });
+
+        // Not one of the preset ids (the old arrow-key ids are not valid any more either), or not even an object: ignored.
+    for (const bad of [{ id: "dance" }, { id: "up" }, { id: "GG" }, { id: "gg " }, { id: 1 }, { id: null }, { id: ["gg"] }, {}, "gg", null, 5]) {
+      b.room.send("emote", bad as any);
+    }
+    // Faster than the cooldown: ignored.
+    a.room.send("emote", { id: "oops" });
+    await sleep(150);
+    assert.strictEqual(count(a.log, "emote"), 1, "a second emote inside the cooldown is dropped");
+    assert.strictEqual(count(b.log, "emote"), 1, "bad emotes were not relayed");
+
+    // After the cooldown the same player can send again, and each player has their own limit.
+    await sleep(250);
+    a.room.send("emote", { id: "nice" });
+    b.room.send("emote", { id: "wow" });
+    await waitFor(a.log, "emote", 8000, 3);
+    await waitFor(b.log, "emote", 8000, 3);
+    assert.deepStrictEqual(
+      b.log.filter((e) => e.type === "emote").map((e) => e.data.id).sort(),
+      ["gg", "nice", "wow"]
+    );
+    delete process.env.EMOTE_COOLDOWN_MS;
+  });
+
+  it("accepts every emote in the preset list (P43)", async () => {
+    process.env.EMOTE_COOLDOWN_MS = "0.001";
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "go");
+    await waitFor(b.log, "go");
+    for (const id of EMOTE_IDS) {
+      a.room.send("emote", { id });
+      await sleep(15);
+    }
+    await waitFor(b.log, "emote", 8000, EMOTE_IDS.length);
+    assert.deepStrictEqual(
+      b.log.filter((e) => e.type === "emote").map((e) => e.data.id),
+      [...EMOTE_IDS]
+    );
+    delete process.env.EMOTE_COOLDOWN_MS;
+  });
+
+  it("does not relay emotes during the countdown, but does after the results so players can chat (P43)", async () => {
+    process.env.EMOTE_COOLDOWN_MS = "0.001";
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "countdown");
+    a.room.send("emote", { id: "gg" }); // still in the countdown
+    await waitFor(a.log, "go");
+    await sleep(100);
+    assert.strictEqual(count(b.log, "emote"), 0, "no emotes during the countdown");
+
+    await waitFor(a.log, "match_result");
+    await sleep(400); // longer than RESULT_CLOSE_DELAY_MS: the room is still open for chat
+    a.room.send("emote", { id: "gg" });
+    assert.deepStrictEqual(await waitFor(b.log, "emote"), { id: "gg", from: a.room.sessionId });
+    delete process.env.EMOTE_COOLDOWN_MS;
+  });
+
+  it("closes the post-game chat soon after one player leaves the results screen (P43)", async () => {
+    process.env.EMOTE_COOLDOWN_MS = "0.001";
+    const a = await joinQuickMatch(colyseus);
+    const b = await joinQuickMatch(colyseus);
+    await waitFor(a.log, "match_result");
+    await waitFor(b.log, "match_result");
+    await a.room.leave();
+    await sleep(600); // RESULT_CLOSE_DELAY_MS is 200
+    b.room.send("emote", { id: "gg" });
+    await sleep(100);
+    assert.strictEqual(count(b.log, "emote"), 0, "nobody is left to chat with");
+    delete process.env.EMOTE_COOLDOWN_MS;
   });
 
   it("tells a lone player when nobody joined, then closes the room", async () => {
