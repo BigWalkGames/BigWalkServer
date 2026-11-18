@@ -19,7 +19,7 @@ import {
  * Run with:  npm test
  */
 
-const EVENTS = ["lobby", "match_found", "countdown", "go", "opponent_progress", "match_result", "opponent_left", "room_closed", "emote"];
+const EVENTS = ["lobby", "match_found", "countdown", "go", "opponent_progress", "match_result", "opponent_left", "room_closed", "emote", "chat", "features"];
 
 type Logged = { type: string; data: any };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -238,6 +238,99 @@ describe("Custom Game", () => {
 
     // Let the rematch finish, so no race is still running when the next test starts.
     await waitFor(host.log, "match_result", 8000, 2);
+  });
+
+  it("lets friends chat in the lobby before the first race (P43)", async () => {
+    const host = await createRoom();
+    const guest = await joinRoom(host.code);
+    await waitFor(host.log, "lobby", 8000, 2);
+
+    // Before anyone is ready: the match has not started, so nobody is in `players` yet.
+    guest.room.send("emote", { id: "gg" });
+    assert.deepStrictEqual(await waitFor(host.log, "emote"), { id: "gg", from: guest.room.sessionId });
+    assert.deepStrictEqual(await waitFor(guest.log, "emote"), { id: "gg", from: guest.room.sessionId });
+
+    // Bad ids and the cooldown still apply in the lobby.
+    host.room.send("emote", { id: "nope" });
+    await sleep(150);
+    assert.strictEqual(count(host.log, "emote"), 1);
+
+    // Still open while one friend is ready and the other is not.
+    await sleep(600); // past the cooldown
+    host.room.send("ready", { ready: true });
+    host.room.send("emote", { id: "nice" });
+    assert.deepStrictEqual(await waitFor(guest.log, "emote", 8000, 2), { id: "nice", from: host.room.sessionId });
+  });
+
+  it("tells each player the server can do typed chat (P43)", async () => {
+    const host = await createRoom();
+    assert.deepStrictEqual(await waitFor(host.log, "features"), { chat: true });
+    const guest = await joinRoom(host.code);
+    assert.deepStrictEqual(await waitFor(guest.log, "features"), { chat: true });
+  });
+
+  it("relays typed chat in the lobby with swearing, links and numbers hidden (P43)", async () => {
+    const host = await createRoom();
+    const guest = await joinRoom(host.code);
+    await waitFor(host.log, "lobby", 8000, 2);
+
+    guest.room.send("chat", { text: "  hello   there  " });
+    assert.deepStrictEqual(await waitFor(host.log, "chat"), { text: "hello there", from: guest.room.sessionId });
+    assert.deepStrictEqual(await waitFor(guest.log, "chat"), { text: "hello there", from: guest.room.sessionId });
+
+    // Only the censored text is ever sent, to the sender as well.
+    await sleep(1100);
+    host.room.send("chat", { text: "you f u c k, call 555 123 4567 or see www.bad.com" });
+    const censored = await waitFor(guest.log, "chat", 8000, 2);
+    assert.strictEqual(censored.from, host.room.sessionId);
+    assert.ok(!/f u c k|555|bad\.com/.test(censored.text), `leaked: ${censored.text}`);
+    assert.match(censored.text, /^you \*+, call \*+ or see \*+$/);
+    assert.deepStrictEqual(await waitFor(host.log, "chat", 8000, 2), censored);
+  });
+
+  it("ignores typed chat that is empty, not text, too fast, too long, or sent alone (P43)", async () => {
+    const alone = await createRoom();
+    await waitFor(alone.log, "lobby");
+    alone.room.send("chat", { text: "anyone?" });
+    await sleep(150);
+    assert.strictEqual(count(alone.log, "chat"), 0, "nobody to talk to");
+
+    const guest = await joinRoom(alone.code);
+    await waitFor(alone.log, "lobby", 8000, 2);
+    for (const bad of [{ text: "   " }, { text: 42 }, { text: null }, {}, null, "hi"]) guest.room.send("chat", bad as any);
+    await sleep(150);
+    assert.strictEqual(count(alone.log, "chat"), 0, "bad messages are ignored");
+
+    guest.room.send("chat", { text: "one" });
+    guest.room.send("chat", { text: "two" }); // inside the one second cooldown
+    await waitFor(alone.log, "chat");
+    await sleep(200);
+    assert.strictEqual(count(alone.log, "chat"), 1, "the second message was too fast");
+
+    await sleep(1000);
+    guest.room.send("chat", { text: "x".repeat(500) });
+    const long = await waitFor(alone.log, "chat", 8000, 2);
+    assert.strictEqual(long.text.length, 80, "cut to CHAT_MAX_LENGTH");
+  });
+
+  it("does not relay typed chat during the race, but does after the results (P43)", async () => {
+    const { host, guest } = await startRace({ MATCH_DURATION_SECONDS: "2", CHAT_COOLDOWN_MS: "0.001" });
+    guest.room.send("chat", { text: "typing in the race" });
+    await sleep(150);
+    assert.strictEqual(count(host.log, "chat"), 0, "the keys are typing the words");
+
+    await waitFor(host.log, "match_result");
+    await sleep(300);
+    guest.room.send("chat", { text: "gg" });
+    assert.deepStrictEqual(await waitFor(host.log, "chat"), { text: "gg", from: guest.room.sessionId });
+  });
+
+  it("does not send emotes to a host who is alone in the lobby (P43)", async () => {
+    const host = await createRoom();
+    await waitFor(host.log, "lobby");
+    host.room.send("emote", { id: "gg" });
+    await sleep(200);
+    assert.strictEqual(count(host.log, "emote"), 0);
   });
 
   it("lets friends keep chatting in the lobby after the results, until the next race starts (P43)", async () => {

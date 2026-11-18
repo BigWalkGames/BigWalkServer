@@ -27,6 +27,8 @@ All settings are environment variables, read on the server only, never from clie
 | `RESULT_CLOSE_DELAY_MS` | 1000 | No | Pause before a room closes, so both clients get the result |
 | `POST_GAME_CHAT_SECONDS` | 120 | No | How long a Quick Match room stays open after the results so players can keep chatting (P43) |
 | `EMOTE_COOLDOWN_MS` | 500 | No | Least time between two emotes from the same player (P43) |
+| `CHAT_COOLDOWN_MS` | 1000 | No | Least time between two typed chat messages from the same player (P43) |
+| `CHAT_MAX_LENGTH` | 80 | No | Longest typed chat message; longer ones are cut (P43) |
 | `CUSTOM_ROOM_IDLE_SECONDS` | 600 | No | A Custom Game lobby with no match started closes after this long |
 | `CLOSED_CODE_MEMORY_MINUTES` | 60 | No | How long a closed room code reads as `expired` instead of `invalid` |
 | `CODE_LOOKUPS_PER_MINUTE` | 120 (20 per caller with `TRUST_PROXY=true`) | No | Rate limit for `GET /api/room-code/status` |
