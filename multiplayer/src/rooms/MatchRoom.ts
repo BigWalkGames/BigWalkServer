@@ -249,13 +249,12 @@ export abstract class MatchRoom extends Room {
 
   /**
    * P43: a player sent an emote. Only ids from EMOTE_IDS are accepted, and a player can
-   * send one every `emoteCooldownMs`. Chat is open in the lobby once both players are
-   * there (before the first race), during the race, and after the results (`chatOpen`).
-   * It is closed during the countdown. Anything else is ignored, never an error. Both
-   * players (the sender too) receive `emote { id, from }`.
+   * send one every `emoteCooldownMs`. Emotes are open in the lobby once both players are
+   * there (before the first race), during the countdown and the race, and after the
+   * results (`chatOpen`). Anything else is ignored, never an error. Both players (the
+   * sender too) receive `emote { id, from }`.
    */
   protected handleEmote(client: Client, message: { id?: unknown }) {
-    if (this.phase === "countdown") return;
     if (this.phase === "waiting" && this.clients.length < 2) return; // nobody to chat with
     if (this.phase === "finished" && !this.chatOpen) return;
     // In the lobby nobody is in `players` yet (it is filled when the match starts), so

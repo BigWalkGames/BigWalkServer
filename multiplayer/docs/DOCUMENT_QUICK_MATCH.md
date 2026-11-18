@@ -59,7 +59,7 @@ The server is the referee: it chooses the words, runs the clock, validates the n
 `emote` with `{ id }` (P43)
 - `id` must be exactly one of the preset emote ids: `gg`, `nice`, `wow`, `oops`, `gl`, `hf`, `ez`, `close`, `fast`, `lol`, `sorry`, `thanks`, `again`, `ouch`, `focus`, `hurry` (the list is `EMOTE_IDS` in `src/rooms/MatchRoom.ts`). Anything else is ignored. There is no free text: the client owns the words for each id and each player chooses which emote goes on which arrow key.
 - Quick Match and Custom Game both use it.
-- Emotes are accepted in the Custom Game lobby once both friends are in the room (before the first match), while racing, and after the results (until the next match starts or a player leaves). Not during the countdown, and not in a Quick Match before the race (it goes straight to the countdown), and not to a host who is alone in a lobby.
+- Emotes are accepted in the Custom Game lobby once both friends are in the room (before the first match), during the countdown and the race, and after the results (until the next match starts or a player leaves). Not to a host who is alone in a lobby. (Typed chat is different: it is not open during the countdown or the race, see below.)
 - Rate limit: one emote per player every `EMOTE_COOLDOWN_MS` (default 500). Faster ones are ignored, not an error, and nobody is disconnected.
 
 `chat` with `{ text }` (P43, typed chat)
@@ -215,7 +215,7 @@ This is a plausibility check, not full anti-cheat. Per-keystroke timing checks a
 | 8 | treats a dropped connection like a leave | A connection that closes without warning counts as a leave. | P18 |
 | 9 | puts a third player in a new room instead of the full one | A room holds two players. A third player gets their own new room. | P15 |
 | 10 | relays emotes to both players, and ignores unknown ids, bad messages and spam | The sender and the opponent both get `emote { id, from }`. Ids not in the list (including the old `up`/`down`), non-objects and emotes inside the cooldown are ignored. | P43 |
-| 11 | does not relay emotes during the countdown, but does after the results | Nothing is relayed during the countdown. After `match_result` emotes still work, so players can chat. | P43 |
+| 11 | relays emotes during the countdown, the race and after the results | An emote sent during the countdown reaches both players. After `match_result` emotes still work, so players can chat. | P43 |
 | 11b | closes the post-game chat soon after one player leaves the results screen | After a player leaves, the room closes after `RESULT_CLOSE_DELAY_MS`. | P43 |
 | 11c | tells a player the server can do typed chat, and relays typed chat only after the results | `features { chat: true }` on join. Typed chat is ignored in the countdown and the race, then relayed (censored) to both players after `match_result`. | P43 |
 
