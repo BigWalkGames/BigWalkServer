@@ -41,7 +41,9 @@ The server is the referee: it chooses the words, runs the clock, validates the n
 | `go` | `{ durationSeconds }` | Race starts | Enable typing, start the timer display. |
 | `opponent_progress` | `{ typed, correct, wordResults? }` | While racing, only to the opponent | Update the opponent's progress display. `wordResults` has one letter per completed word, in order: `g` no mistakes, `r` had a mistake. It is optional and only used for the opponent's progress bar. The server accepts only `g` and `r`, at most one per word and never more than `typed`. |
 | `match_result` | `{ winner, results }` | Race over | `winner` is a session id, or `null` for a draw. `results[sessionId] = { wpm, accuracy, correct, typed, errors }`. `wpm` is Net WPM. `durationSeconds` is the time the race really took (shorter than the full time when someone finished the text). |
-| `emote` | `{ id, from }` | A player sent an emote during the race or after the results. **Both** players get it, the sender too. | Show it in the match chat. `id` is one of the preset emote ids (below); `from` is the sender's session id. |
+| `emote` | `{ id, from }` | A player sent an emote in the lobby (Custom Game), during the race or after the results. **Both** players get it, the sender too. | Show it in the match chat. `id` is one of the preset emote ids (below); `from` is the sender's session id. |
+| `chat` | `{ text, from }` | A player sent a typed message (below). **Both** players get it, the sender too. | Show `text` in the match chat as it is: it has already been cleaned and censored by the server. `from` is the sender's session id. |
+| `features` | `{ chat }` | Once, when you join. | `chat: true` means this server understands typed chat. Only show the typing box when you get it: an older server disconnects a client that sends a message it does not know. |
 | `opponent_left` | `{}` | Opponent left mid-match | Go back to the Main Menu with a message. |
 | `no_opponent` | `{ waitedSeconds }` | Nobody joined in time | Go back to the Main Menu with a message. |
 
@@ -56,9 +58,17 @@ The server is the referee: it chooses the words, runs the clock, validates the n
 
 `emote` with `{ id }` (P43)
 - `id` must be exactly one of the preset emote ids: `gg`, `nice`, `wow`, `oops`, `gl`, `hf`, `ez`, `close`, `fast`, `lol`, `sorry`, `thanks`, `again`, `ouch`, `focus`, `hurry` (the list is `EMOTE_IDS` in `src/rooms/MatchRoom.ts`). Anything else is ignored. There is no free text: the client owns the words for each id and each player chooses which emote goes on which arrow key.
-- Only accepted while the race is running (not in the countdown, and not after the result). Quick Match and Custom Game both use it.
-- Emotes are accepted while racing and after the results (until the next match starts or a player leaves). Not during the countdown or the lobby before the first match.
+- Quick Match and Custom Game both use it.
+- Emotes are accepted in the Custom Game lobby once both friends are in the room (before the first match), during the countdown and the race, and after the results (until the next match starts or a player leaves). Not to a host who is alone in a lobby. (Typed chat is different: it is not open during the countdown or the race, see below.)
 - Rate limit: one emote per player every `EMOTE_COOLDOWN_MS` (default 500). Faster ones are ignored, not an error, and nobody is disconnected.
+
+`chat` with `{ text }` (P43, typed chat)
+- Free text, so everything is cleaned on the server (`src/chat/censor.ts`) before anyone sees it, because children play. The client must show the `text` it gets and never the text it sent.
+- Open in the Custom Game lobby once both friends are in the room, and after the results (until the next match starts or a player leaves). Closed during the countdown and the race (the keys are typing the words), in a Quick Match before the results, and to a host who is alone in a lobby.
+- Cleaning: control and invisible characters are removed, full-width letters become normal ones, spaces are squeezed, and the text is cut to `CHAT_MAX_LENGTH` (default 80). Swear words, letters spread out to dodge the filter (`f u c k`), mild swearing and wishing harm on someone are replaced by asterisks. Web addresses, emails and anything that looks like a phone number (7 or more digits) are replaced by asterisks too. Empty or non-text messages are ignored.
+- The word lists are the `obscenity` English list plus `EXTRA_WORDS` and `EXTRA_PHRASES` at the top of `src/chat/censor.ts`. Add or remove words there.
+- Rate limit: one message per player every `CHAT_COOLDOWN_MS` (default 1000). Faster ones are ignored, not an error.
+- No filter is perfect. A filter cannot catch every spelling, or links written as "dot com". If this needs to be stricter, report/mute is the next step, not a longer word list.
 
 ### Connecting from the web client
 
@@ -149,6 +159,8 @@ Read when a room is created. Set them before `npm start`, for example `QUICK_MAT
 | `RESULT_CLOSE_DELAY_MS` | 1000 | Pause before closing when a player leaves (or the match is cut short) |
 | `POST_GAME_CHAT_SECONDS` | 120 | How long a Quick Match room stays open after the results for emotes |
 | `EMOTE_COOLDOWN_MS` | 500 | Least time between two emotes from the same player |
+| `CHAT_COOLDOWN_MS` | 1000 | Least time between two typed chat messages from the same player |
+| `CHAT_MAX_LENGTH` | 80 | Longest typed chat message; longer ones are cut |
 
 ### Setting them on the Docker server: `mp-config.sh`
 
@@ -203,8 +215,9 @@ This is a plausibility check, not full anti-cheat. Per-keystroke timing checks a
 | 8 | treats a dropped connection like a leave | A connection that closes without warning counts as a leave. | P18 |
 | 9 | puts a third player in a new room instead of the full one | A room holds two players. A third player gets their own new room. | P15 |
 | 10 | relays emotes to both players, and ignores unknown ids, bad messages and spam | The sender and the opponent both get `emote { id, from }`. Ids not in the list (including the old `up`/`down`), non-objects and emotes inside the cooldown are ignored. | P43 |
-| 11 | does not relay emotes during the countdown, but does after the results | Nothing is relayed during the countdown. After `match_result` emotes still work, so players can chat. | P43 |
+| 11 | relays emotes during the countdown, the race and after the results | An emote sent during the countdown reaches both players. After `match_result` emotes still work, so players can chat. | P43 |
 | 11b | closes the post-game chat soon after one player leaves the results screen | After a player leaves, the room closes after `RESULT_CLOSE_DELAY_MS`. | P43 |
+| 11c | tells a player the server can do typed chat, and relays typed chat only after the results | `features { chat: true }` on join. Typed chat is ignored in the countdown and the race, then relayed (censored) to both players after `match_result`. | P43 |
 
 These test the server only. They do not test the browser, a real wifi drop, or two physical computers.
 

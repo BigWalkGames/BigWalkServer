@@ -3,6 +3,7 @@ import { Room, Client } from "colyseus";
 import { pickWords } from "./words.js";
 import { saveResult, type PlayerResult } from "../results.js";
 import { authenticate, type AuthUser } from "../auth.js";
+import { cleanChatText } from "../chat/censor.js";
 
 /**
  * The race itself, shared by Quick Match and Custom Game rooms.
@@ -94,6 +95,10 @@ export function readConfig() {
     postGameChatSeconds: num("POST_GAME_CHAT_SECONDS", 120),
     // Emotes: the least time between two emotes from the same player.
     emoteCooldownMs: num("EMOTE_COOLDOWN_MS", 500),
+    // Typed chat: the least time between two messages from the same player, and the
+    // longest message (longer ones are cut).
+    chatCooldownMs: num("CHAT_COOLDOWN_MS", 1000),
+    chatMaxLength: Math.floor(num("CHAT_MAX_LENGTH", 80)),
   };
 }
 
@@ -121,6 +126,8 @@ export abstract class MatchRoom extends Room {
   protected raceTimer?: Timer;
   /** When each player last sent an emote (ms), for the rate limit. */
   protected lastEmoteAt = new Map<string, number>();
+  /** When each player last sent a typed message (ms), for the rate limit. */
+  protected lastChatAt = new Map<string, number>();
 
   /** How the match was made, reported with the result. */
   protected abstract readonly mode: "quick_match" | "custom";
@@ -135,7 +142,19 @@ export abstract class MatchRoom extends Room {
     emote: (client: Client, message: { id?: unknown }) => {
       this.handleEmote(client, message);
     },
+    chat: (client: Client, message: { text?: unknown }) => {
+      this.handleChat(client, message);
+    },
   };
+
+  /**
+   * Tell a player what this server can do. A client only shows the typing box when it
+   * gets this, so a newer client never sends `chat` to an older server (an older server
+   * disconnects a client that sends a message it does not know). Subclasses call it in onJoin.
+   */
+  protected announceFeatures(client: Client) {
+    client.send("features", { chat: true });
+  }
 
   /**
    * Checks the player's Supabase token when REQUIRE_AUTH is on (see src/auth.ts).
@@ -229,13 +248,18 @@ export abstract class MatchRoom extends Room {
   }
 
   /**
-   * P43: a player sent an emote. Only ids from EMOTE_IDS are accepted, only while the
-   * race is on, and a player can send one every `emoteCooldownMs`. Anything else is
-   * ignored, never an error. Both players (the sender too) receive `emote { id, from }`.
+   * P43: a player sent an emote. Only ids from EMOTE_IDS are accepted, and a player can
+   * send one every `emoteCooldownMs`. Emotes are open in the lobby once both players are
+   * there (before the first race), during the countdown and the race, and after the
+   * results (`chatOpen`). Anything else is ignored, never an error. Both players (the
+   * sender too) receive `emote { id, from }`.
    */
   protected handleEmote(client: Client, message: { id?: unknown }) {
-    if (this.phase !== "racing" && !this.chatOpen) return;
-    if (!this.players.has(client.sessionId)) return;
+    if (this.phase === "waiting" && this.clients.length < 2) return; // nobody to chat with
+    if (this.phase === "finished" && !this.chatOpen) return;
+    // In the lobby nobody is in `players` yet (it is filled when the match starts), so
+    // check the room's own clients instead.
+    if (!this.clients.some((c) => c.sessionId === client.sessionId)) return;
     if (!isEmoteId(message?.id)) return;
 
     const now = Date.now();
@@ -244,6 +268,31 @@ export abstract class MatchRoom extends Room {
     this.lastEmoteAt.set(client.sessionId, now);
 
     this.broadcast("emote", { id: message.id, from: client.sessionId });
+  }
+
+  /**
+   * Typed chat: a player sent `chat { text }`. It is open in the lobby once both players
+   * are there and after the results (not while racing, when the keys are typing the
+   * words, and not during the countdown). The text is cleaned and censored here (see
+   * src/chat/censor.ts); both players, the sender too, receive `chat { text, from }`
+   * with the cleaned text, never the original. A player can send one message every
+   * `chatCooldownMs`, and a message is cut to `chatMaxLength`. Anything else is ignored.
+   */
+  protected handleChat(client: Client, message: { text?: unknown }) {
+    const lobbyOpen = this.phase === "waiting" && this.clients.length >= 2;
+    const resultsOpen = this.phase === "finished" && this.chatOpen;
+    if (!lobbyOpen && !resultsOpen) return;
+    if (!this.clients.some((c) => c.sessionId === client.sessionId)) return;
+
+    const text = cleanChatText(message?.text, this.config.chatMaxLength);
+    if (text === null) return;
+
+    const now = Date.now();
+    const last = this.lastChatAt.get(client.sessionId) ?? 0;
+    if (now - last < this.config.chatCooldownMs) return; // too fast
+    this.lastChatAt.set(client.sessionId, now);
+
+    this.broadcast("chat", { text, from: client.sessionId });
   }
 
   /** The server counts the time, so a client can't stretch or shrink the race. */

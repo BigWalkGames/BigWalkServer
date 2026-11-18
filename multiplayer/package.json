@@ -33,6 +33,7 @@
     "@colyseus/tools": "^0.18.1",
     "colyseus": "^0.18.2",
     "express": "^5.2.1",
-    "jose": "6.2.12"
+    "jose": "6.2.12",
+    "obscenity": "0.4.6"
   }
 }
