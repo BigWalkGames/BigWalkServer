@@ -3,6 +3,7 @@ import { Room, Client } from "colyseus";
 import { pickWords } from "./words.js";
 import { saveResult, type PlayerResult } from "../results.js";
 import { authenticate, type AuthUser } from "../auth.js";
+import { cleanChatText } from "../chat/censor.js";
 
 /**
  * The race itself, shared by Quick Match and Custom Game rooms.
@@ -19,10 +20,40 @@ import { authenticate, type AuthUser } from "../auth.js";
  *   opponent_progress  { typed, correct, wordResults? }  only the OTHER player gets this
  *   match_result       { winner, results }      winner = sessionId, or null for a draw
  *   opponent_left      {}                       opponent left or disconnected
+ *   emote              { id, from }             a player sent an emote; BOTH players get it
  *
- * Message the CLIENT sends:
+ * Messages the CLIENT sends:
  *   progress           { typed, correct }       cumulative counts since "go"
+ *   emote              { id }                   id is one of EMOTE_IDS (the preset emote list)
  */
+
+/**
+ * The emotes a player can send: a fixed list of ids, never free text. The client shows
+ * the words for each id and lets every player choose which four go on the arrow keys.
+ * Anything not in this list is ignored. Keep it in step with the client's emote list.
+ */
+export const EMOTE_IDS = [
+  "gg",
+  "nice",
+  "wow",
+  "oops",
+  "gl",
+  "hf",
+  "ez",
+  "close",
+  "fast",
+  "lol",
+  "sorry",
+  "thanks",
+  "again",
+  "ouch",
+  "focus",
+  "hurry",
+] as const;
+export type EmoteId = (typeof EMOTE_IDS)[number];
+
+const isEmoteId = (value: unknown): value is EmoteId =>
+  typeof value === "string" && (EMOTE_IDS as readonly string[]).includes(value);
 
 export type Phase = "waiting" | "countdown" | "racing" | "finished";
 export type Timer = ReturnType<Room["clock"]["setTimeout"]>;
@@ -59,6 +90,15 @@ export function readConfig() {
     closeDelayMs: num("RESULT_CLOSE_DELAY_MS", 1000),
     // Custom Game: how long a lobby can sit without starting a match before it closes.
     customIdleSeconds: num("CUSTOM_ROOM_IDLE_SECONDS", 600),
+    // Quick Match: how long the room stays open after the results so the players can
+    // keep chatting (emotes). It closes sooner if one of them leaves.
+    postGameChatSeconds: num("POST_GAME_CHAT_SECONDS", 120),
+    // Emotes: the least time between two emotes from the same player.
+    emoteCooldownMs: num("EMOTE_COOLDOWN_MS", 500),
+    // Typed chat: the least time between two messages from the same player, and the
+    // longest message (longer ones are cut).
+    chatCooldownMs: num("CHAT_COOLDOWN_MS", 1000),
+    chatMaxLength: Math.floor(num("CHAT_MAX_LENGTH", 80)),
   };
 }
 
@@ -73,6 +113,8 @@ export abstract class MatchRoom extends Room {
 
   protected config = readConfig();
   protected phase: Phase = "waiting";
+  /** True from the results until the next match starts: emotes are still accepted. */
+  protected chatOpen = false;
   protected players = new Map<string, PlayerStats>();
   /** Supabase user id per session id, taken when the match starts. */
   protected accounts: Record<string, string> = {};
@@ -82,6 +124,10 @@ export abstract class MatchRoom extends Room {
   protected startedAt = 0;
   protected countdownTimer?: Timer;
   protected raceTimer?: Timer;
+  /** When each player last sent an emote (ms), for the rate limit. */
+  protected lastEmoteAt = new Map<string, number>();
+  /** When each player last sent a typed message (ms), for the rate limit. */
+  protected lastChatAt = new Map<string, number>();
 
   /** How the match was made, reported with the result. */
   protected abstract readonly mode: "quick_match" | "custom";
@@ -93,7 +139,22 @@ export abstract class MatchRoom extends Room {
     progress: (client: Client, message: ProgressMessage) => {
       this.handleProgress(client, message);
     },
+    emote: (client: Client, message: { id?: unknown }) => {
+      this.handleEmote(client, message);
+    },
+    chat: (client: Client, message: { text?: unknown }) => {
+      this.handleChat(client, message);
+    },
   };
+
+  /**
+   * Tell a player what this server can do. A client only shows the typing box when it
+   * gets this, so a newer client never sends `chat` to an older server (an older server
+   * disconnects a client that sends a message it does not know). Subclasses call it in onJoin.
+   */
+  protected announceFeatures(client: Client) {
+    client.send("features", { chat: true });
+  }
 
   /**
    * Checks the player's Supabase token when REQUIRE_AUTH is on (see src/auth.ts).
@@ -122,6 +183,10 @@ export abstract class MatchRoom extends Room {
       this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
     } else if (this.phase === "waiting") {
       this.onLeaveBeforeMatch(client);
+    } else if (this.phase === "finished" && this.chatOpen) {
+      // Someone left the results screen: the chat is over, so close the room soon.
+      this.chatOpen = false;
+      this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
     }
   }
 
@@ -134,6 +199,7 @@ export abstract class MatchRoom extends Room {
   /** P19: both players get the same words and the same countdown. */
   protected startMatch() {
     this.lock(); // nobody else can join this match
+    this.chatOpen = false;
     this.phase = "countdown";
 
     const { countdownSeconds, durationSeconds, wordCount } = this.config;
@@ -145,6 +211,7 @@ export abstract class MatchRoom extends Room {
     for (const id of ids) {
       this.players.set(id, { typed: 0, correct: 0, errors: 0 });
     }
+    this.lastEmoteAt.clear();
     this.matchId = randomUUID();
     this.accounts = Object.fromEntries(
       this.clients.map((c) => [c.sessionId, (c.auth as AuthUser).id])
@@ -178,6 +245,54 @@ export abstract class MatchRoom extends Room {
       () => this.finishMatch(),
       this.config.durationSeconds * 1000
     );
+  }
+
+  /**
+   * P43: a player sent an emote. Only ids from EMOTE_IDS are accepted, and a player can
+   * send one every `emoteCooldownMs`. Emotes are open in the lobby once both players are
+   * there (before the first race), during the countdown and the race, and after the
+   * results (`chatOpen`). Anything else is ignored, never an error. Both players (the
+   * sender too) receive `emote { id, from }`.
+   */
+  protected handleEmote(client: Client, message: { id?: unknown }) {
+    if (this.phase === "waiting" && this.clients.length < 2) return; // nobody to chat with
+    if (this.phase === "finished" && !this.chatOpen) return;
+    // In the lobby nobody is in `players` yet (it is filled when the match starts), so
+    // check the room's own clients instead.
+    if (!this.clients.some((c) => c.sessionId === client.sessionId)) return;
+    if (!isEmoteId(message?.id)) return;
+
+    const now = Date.now();
+    const last = this.lastEmoteAt.get(client.sessionId) ?? 0;
+    if (now - last < this.config.emoteCooldownMs) return; // too fast
+    this.lastEmoteAt.set(client.sessionId, now);
+
+    this.broadcast("emote", { id: message.id, from: client.sessionId });
+  }
+
+  /**
+   * Typed chat: a player sent `chat { text }`. It is open in the lobby once both players
+   * are there and after the results (not while racing, when the keys are typing the
+   * words, and not during the countdown). The text is cleaned and censored here (see
+   * src/chat/censor.ts); both players, the sender too, receive `chat { text, from }`
+   * with the cleaned text, never the original. A player can send one message every
+   * `chatCooldownMs`, and a message is cut to `chatMaxLength`. Anything else is ignored.
+   */
+  protected handleChat(client: Client, message: { text?: unknown }) {
+    const lobbyOpen = this.phase === "waiting" && this.clients.length >= 2;
+    const resultsOpen = this.phase === "finished" && this.chatOpen;
+    if (!lobbyOpen && !resultsOpen) return;
+    if (!this.clients.some((c) => c.sessionId === client.sessionId)) return;
+
+    const text = cleanChatText(message?.text, this.config.chatMaxLength);
+    if (text === null) return;
+
+    const now = Date.now();
+    const last = this.lastChatAt.get(client.sessionId) ?? 0;
+    if (now - last < this.config.chatCooldownMs) return; // too fast
+    this.lastChatAt.set(client.sessionId, now);
+
+    this.broadcast("chat", { text, from: client.sessionId });
   }
 
   /** The server counts the time, so a client can't stretch or shrink the race. */
@@ -283,11 +398,15 @@ export abstract class MatchRoom extends Room {
       durationSeconds: reported,
       finishedAt: new Date().toISOString(),
     });
+    this.chatOpen = true;
     this.onMatchFinished();
   }
 
-  /** What happens to the room once the results are out. Quick Match: it closes. */
+  /**
+   * What happens to the room once the results are out. Quick Match: it stays open for
+   * `postGameChatSeconds` so the players can keep sending emotes, then closes.
+   */
   protected onMatchFinished() {
-    this.clock.setTimeout(() => this.disconnect(), this.config.closeDelayMs);
+    this.clock.setTimeout(() => this.disconnect(), this.config.postGameChatSeconds * 1000);
   }
 }

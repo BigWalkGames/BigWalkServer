@@ -30,6 +30,7 @@ export class QuickMatchRoom extends MatchRoom {
 
   onJoin(client: Client, options: any) {
     console.log(client.sessionId, "joined!", `(${this.clients.length}/2)`);
+    this.announceFeatures(client);
     if (this.phase === "waiting" && this.clients.length === 2) {
       this.waitTimer?.clear();
       this.startMatch();

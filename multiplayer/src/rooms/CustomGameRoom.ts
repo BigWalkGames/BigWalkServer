@@ -27,6 +27,8 @@ export class CustomGameRoom extends MatchRoom {
 
   messages = {
     progress: (client: Client, message: any) => this.handleProgress(client, message),
+    emote: (client: Client, message: any) => this.handleEmote(client, message),
+    chat: (client: Client, message: any) => this.handleChat(client, message),
     ready: (client: Client, message: any) => this.handleReady(client, message),
   };
 
@@ -67,6 +69,7 @@ export class CustomGameRoom extends MatchRoom {
 
   onJoin(client: Client, options: any) {
     console.log(client.sessionId, "joined room", this.roomCode, `(${this.clients.length}/2)`);
+    this.announceFeatures(client);
     this.broadcastLobby();
   }
 
